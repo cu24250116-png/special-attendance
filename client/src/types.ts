@@ -1,6 +1,8 @@
 export interface Student {
   cu_id: string;
   student_name: string;
+  roll_number?: string;
+  father_name?: string;
   course: string;
   branch: string;
   semester: string;

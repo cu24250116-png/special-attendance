@@ -101,8 +101,18 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <span className="px-2.5 py-1 rounded-md bg-slate-800/80 text-slate-200 text-xs font-mono font-medium border border-slate-700">
                 CU ID: {student.cu_id}
               </span>
+              {student.roll_number && (
+                <span className="px-2.5 py-1 rounded-md bg-slate-800/80 text-sky-300 text-xs font-mono font-medium border border-slate-700">
+                  Roll No: {student.roll_number}
+                </span>
+              )}
+              {student.father_name && (
+                <span className="px-2.5 py-1 rounded-md bg-slate-800/80 text-slate-300 text-xs font-medium border border-slate-700">
+                  Father: {student.father_name}
+                </span>
+              )}
               <span className="px-2.5 py-1 rounded-md bg-slate-800/80 text-slate-300 text-xs font-medium border border-slate-700">
-                Semester {student.semester} • Section {student.section}
+                Sem {student.semester} • Sec {student.section}
               </span>
             </div>
           </div>

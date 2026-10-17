@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
+import { hashPassword } from './auth.js';
 
 // Flexible column name normalizer
 function normalizeKey(str) {
@@ -13,26 +14,30 @@ function normalizeKey(str) {
     .replace(/_+/g, '_');
 }
 
-// Column aliases mapping
+// Column aliases mapping for flexible header matching
 const COLUMN_ALIASES = {
   // Students
-  cu_id: ['cu_id', 'cuid', 'student_id', 'roll_no', 'rollno', 'registration_no', 'reg_no', 'id'],
-  student_name: ['student_name', 'name', 'full_name', 'candidate_name', 'student'],
-  course: ['course', 'program', 'degree'],
+  roll_number: ['roll_number', 'roll_no', 'rollno', 'roll', 'class_roll_no', 'univ_roll_no', 'university_roll_no', 's_no', 'serial_no', 'sno'],
+  cu_id: ['cu_id', 'cuid', 'student_id', 'studentid', 'student_id_no', 'college_id', 'registration_no', 'reg_no', 'enrollment_no', 'id'],
+  student_name: ['student_name', 'name', 'full_name', 'candidate_name', 'student', 'studentname'],
+  father_name: ['father_name', 'father_s_name', 'fathers_name', 'fathername', 'father', 'guardian_name', 'parent_name'],
+  course: ['course', 'program', 'degree', 'class'],
   branch: ['branch', 'department', 'dept', 'stream', 'spec'],
   semester: ['semester', 'sem', 'term'],
   section: ['section', 'sec', 'group', 'batch'],
   email: ['email', 'email_id', 'mail'],
   phone: ['phone', 'mobile', 'contact', 'phone_number'],
 
-  // Attendance
+  // Attendance in student master sheet
+  total_sessions: ['class_conducted', 'classes_conducted', 'total_classes', 'total_sessions', 'total', 'sessions', 'classes_held', 'conducted', 'held'],
+  present_sessions: ['total_present', 'present', 'present_sessions', 'attended', 'attended_sessions'],
+  absent_sessions: ['total_absent', 'absent', 'absent_sessions', 'missed', 'missed_sessions'],
+  attendance_percentage: ['total_percentage', 'percentage', 'attendance_percentage', 'pct', 'percent', '%', 'total_%', 'overall_percentage', 'att_%'],
+  status: ['status', 'attendance_status'],
+
+  // Attendance specific sheet
   attendance_date: ['attendance_date', 'date', 'session_date', 'day'],
   subject: ['subject', 'course_code', 'subject_name', 'course_name', 'module'],
-  total_sessions: ['total_sessions', 'total', 'sessions', 'classes_held', 'conducted'],
-  present_sessions: ['present_sessions', 'present', 'attended', 'attended_sessions'],
-  absent_sessions: ['absent_sessions', 'absent', 'missed', 'missed_sessions'],
-  attendance_percentage: ['attendance_percentage', 'percentage', 'pct', 'percent', '%'],
-  status: ['status', 'attendance_status'],
 
   // Assignments
   assignment_id: ['assignment_id', 'assign_id', 'assignment_no', 'task_id', 'code'],
@@ -42,6 +47,31 @@ const COLUMN_ALIASES = {
   submission_date: ['submission_date', 'submitted_on', 'submission_timestamp', 'submitted_date'],
   remarks: ['remarks', 'verification_status', 'notes', 'comments', 'feedback'],
 };
+
+// Check if a column header represents an attendance date or special class
+function isDateColumnHeader(key) {
+  if (!key) return false;
+  const k = String(key).trim();
+  const normKey = normalizeKey(k);
+
+  // Exclude known metadata columns
+  for (const list of Object.values(COLUMN_ALIASES)) {
+    if (list.includes(normKey)) return false;
+  }
+
+  // Check date patterns like 15/10/2024, 2024-10-15, 15-10-24, 15.10.2024, 15/10, etc.
+  if (/\b\d{1,4}[-/.]\d{1,2}([-/.]\d{1,4})?\b/.test(k)) return true;
+  // Check month words like 15-Oct, 15 Oct, Oct-15, etc.
+  if (/\b\d{1,2}[-/\s]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(k)) return true;
+  // Check explicit naming
+  if (/(date|special.*class|class.*date|session)/i.test(k)) return true;
+
+  // Check if string can parse as calendar date
+  const d = new Date(k);
+  if (!isNaN(d.getTime()) && d.getFullYear() >= 2020 && d.getFullYear() <= 2035) return true;
+
+  return false;
+}
 
 export class ExcelProcessor {
   // Map an incoming row object keys using fuzzy aliases
@@ -83,38 +113,40 @@ export class ExcelProcessor {
   }
 
   // Generate preview & validation summary without committing to database
-  static generatePreview(buffer, customMapping = {}) {
+  static generatePreview(buffer) {
     const { sheetNames, sheetsData } = this.parseBuffer(buffer);
 
     let previewStudents = [];
     let previewAttendance = [];
     let previewAssignments = [];
-    let validationIssues = [];
+    const validationIssues = [];
 
     // Check sheets
     for (const name of sheetNames) {
       const lower = name.toLowerCase().trim();
       const rows = sheetsData[name] || [];
 
-      if (lower.includes('student')) {
-        previewStudents = rows.slice(0, 10).map((r, i) => this.mapRowFields(r, Object.keys(COLUMN_ALIASES)));
+      if (lower.includes('student') || sheetNames.length === 1) {
+        previewStudents = rows.slice(0, 10).map((r) => this.mapRowFields(r, [
+          'roll_number', 'cu_id', 'student_name', 'father_name', 'course', 'branch',
+          'semester', 'section', 'total_sessions', 'present_sessions', 'attendance_percentage'
+        ]));
       } else if (lower.includes('attend')) {
-        previewAttendance = rows.slice(0, 10).map((r, i) => this.mapRowFields(r, Object.keys(COLUMN_ALIASES)));
+        previewAttendance = rows.slice(0, 10).map((r) => this.mapRowFields(r, Object.keys(COLUMN_ALIASES)));
       } else if (lower.includes('assign')) {
-        previewAssignments = rows.slice(0, 10).map((r, i) => this.mapRowFields(r, Object.keys(COLUMN_ALIASES)));
+        previewAssignments = rows.slice(0, 10).map((r) => this.mapRowFields(r, Object.keys(COLUMN_ALIASES)));
       }
     }
 
-    // If sheets weren't named with keywords, fallback to first sheet
-    if (previewStudents.length === 0 && previewAttendance.length === 0 && previewAssignments.length === 0 && sheetNames.length > 0) {
+    if (previewStudents.length === 0 && sheetNames.length > 0) {
       const firstRows = sheetsData[sheetNames[0]] || [];
-      previewStudents = firstRows.slice(0, 10).map(r => this.mapRowFields(r, Object.keys(COLUMN_ALIASES)));
+      previewStudents = firstRows.slice(0, 10).map((r) => this.mapRowFields(r, Object.keys(COLUMN_ALIASES)));
     }
 
     return {
       sheetNames,
       totalRows: {
-        students: (sheetsData['Students'] || sheetsData['students'] || []).length,
+        students: (sheetsData['Students'] || sheetsData['students'] || sheetsData[sheetNames[0]] || []).length,
         attendance: (sheetsData['Attendance'] || sheetsData['attendance'] || []).length,
         assignments: (sheetsData['Assignments'] || sheetsData['assignments'] || []).length,
       },
@@ -139,7 +171,6 @@ export class ExcelProcessor {
       const date = new Date(Math.round((Number(str) - 25569) * 86400 * 1000));
       return date.toISOString().split('T')[0];
     }
-    // Standard string date
     const d = new Date(str);
     if (!isNaN(d.getTime())) {
       return d.toISOString().split('T')[0];
@@ -173,21 +204,28 @@ export class ExcelProcessor {
       else if (lower.includes('assign')) assignmentRows = rows;
     }
 
-    // Fallback: If single sheet contains student + attendance info
-    if (studentRows.length === 0 && attendanceRows.length === 0 && sheetNames.length === 1) {
+    // Fallback: If single sheet uploaded (like the user's master Excel)
+    if (studentRows.length === 0 && sheetNames.length > 0) {
       studentRows = sheetsData[sheetNames[0]] || [];
     }
 
     totalRows = studentRows.length + attendanceRows.length + assignmentRows.length;
 
-    // 1. Process Students Sheet
+    // 1. Process Students & Embedded Special Class Date Columns
     for (let i = 0; i < studentRows.length; i++) {
       const raw = studentRows[i];
       const mapped = this.mapRowFields(raw, [
-        'cu_id', 'student_name', 'course', 'branch', 'semester', 'section', 'email', 'phone'
+        'roll_number', 'cu_id', 'student_name', 'father_name', 'course', 'branch',
+        'semester', 'section', 'email', 'phone', 'total_sessions', 'present_sessions',
+        'absent_sessions', 'attendance_percentage'
       ]);
 
-      const cuId = mapped.cu_id ? String(mapped.cu_id).trim().toUpperCase() : null;
+      // CU ID priority: cu_id -> student_id -> roll_number
+      let cuId = mapped.cu_id ? String(mapped.cu_id).trim().toUpperCase() : null;
+      if (!cuId && mapped.roll_number) {
+        cuId = String(mapped.roll_number).trim().toUpperCase();
+      }
+
       const studentName = mapped.student_name ? String(mapped.student_name).trim() : null;
 
       if (!cuId) {
@@ -195,7 +233,7 @@ export class ExcelProcessor {
           sheet_name: 'Students',
           row_number: i + 2,
           cu_id: null,
-          error_message: 'Missing mandatory CU_ID',
+          error_message: 'Missing mandatory Student ID / CU ID / Roll Number',
           raw_data: JSON.stringify(raw),
         });
         continue;
@@ -206,7 +244,7 @@ export class ExcelProcessor {
           sheet_name: 'Students',
           row_number: i + 2,
           cu_id: cuId,
-          error_message: 'Missing mandatory Student_Name',
+          error_message: 'Missing mandatory Student Name',
           raw_data: JSON.stringify(raw),
         });
         continue;
@@ -214,62 +252,158 @@ export class ExcelProcessor {
 
       affectedCuIds.add(cuId);
 
-      // Check existing student
+      // Student Password: By default, the student's password is their CU ID (or roll number)
+      const defaultPassword = cuId;
+      const studentPasswordHash = hashPassword(defaultPassword);
+
+      // Extract special class date columns in this student row
+      const rawKeys = Object.keys(raw);
+      const dateColumns = rawKeys.filter((k) => isDateColumnHeader(k));
+
+      let embeddedHeldCount = 0;
+      let embeddedPresentCount = 0;
+
+      for (const dateKey of dateColumns) {
+        const cellVal = String(raw[dateKey] || '').trim().toUpperCase();
+        if (!cellVal) continue; // empty cell, no record for this date
+
+        embeddedHeldCount++;
+        const isPresent = cellVal === 'P' || cellVal === 'PRESENT' || cellVal === '1' || cellVal === 'YES';
+        if (isPresent) embeddedPresentCount++;
+
+        const formattedDate = this.formatDate(dateKey) || dateKey;
+        const status = isPresent ? 'Present' : 'Absent';
+        const pct = isPresent ? 100 : 0;
+        const presentCount = isPresent ? 1 : 0;
+        const absentCount = isPresent ? 0 : 1;
+
+        // Upsert attendance record for this special class date
+        const existingAtt = await db.get(
+          'SELECT id FROM attendance_records WHERE cu_id = ? AND attendance_date = ?',
+          [cuId, formattedDate]
+        );
+
+        if (existingAtt) {
+          await db.run(`
+            UPDATE attendance_records SET
+              total_sessions = 1,
+              present_sessions = ?,
+              absent_sessions = ?,
+              attendance_percentage = ?,
+              status = ?
+            WHERE id = ?
+          `, [presentCount, absentCount, pct, status, existingAtt.id]);
+        } else {
+          await db.run(`
+            INSERT INTO attendance_records (
+              id, cu_id, attendance_date, subject, total_sessions, present_sessions,
+              absent_sessions, attendance_percentage, status, created_at
+            ) VALUES (?, ?, ?, 'Special Class', 1, ?, ?, ?, ?, ?)
+          `, [uuidv4(), cuId, formattedDate, presentCount, absentCount, pct, status, now]);
+        }
+        attendanceUpdated++;
+      }
+
+      // Calculate totals: prioritize explicit columns if present; otherwise use embedded counts
+      let totalHeld = parseInt(mapped.total_sessions, 10);
+      let totalPres = parseInt(mapped.present_sessions, 10);
+      let totalAbs = parseInt(mapped.absent_sessions, 10);
+
+      if (isNaN(totalHeld) || totalHeld <= 0) {
+        totalHeld = embeddedHeldCount > 0 ? embeddedHeldCount : 0;
+      }
+      if (isNaN(totalPres)) {
+        totalPres = embeddedPresentCount;
+      }
+      if (isNaN(totalAbs)) {
+        totalAbs = Math.max(0, totalHeld - totalPres);
+      }
+
+      // Calculate percentage
+      let finalPercentage = parseFloat(mapped.attendance_percentage);
+      if (isNaN(finalPercentage) || finalPercentage <= 0) {
+        finalPercentage = totalHeld > 0 ? Math.round(((totalPres / totalHeld) * 100) * 10) / 10 : 0;
+      }
+
+      // Upsert student record
       const existing = await db.get('SELECT * FROM students WHERE cu_id = ?', [cuId]);
       if (existing) {
         await db.run(`
           UPDATE students SET
             student_name = ?,
+            roll_number = COALESCE(?, roll_number),
+            father_name = COALESCE(?, father_name),
             course = COALESCE(?, course),
             branch = COALESCE(?, branch),
             semester = COALESCE(?, semester),
             section = COALESCE(?, section),
             email = COALESCE(?, email),
             phone = COALESCE(?, phone),
+            password_hash = COALESCE(password_hash, ?),
+            overall_percentage = ?,
+            total_sessions = ?,
+            present_sessions = ?,
+            absent_sessions = ?,
             last_updated = ?
           WHERE cu_id = ?
         `, [
           studentName,
+          mapped.roll_number || null,
+          mapped.father_name || null,
           mapped.course || null,
-          mapped.branch || null,
+          mapped.branch || mapped.course || null,
           mapped.semester || null,
           mapped.section || null,
           mapped.email || null,
           mapped.phone || null,
+          studentPasswordHash,
+          finalPercentage,
+          totalHeld,
+          totalPres,
+          totalAbs,
           now,
           cuId
         ]);
       } else {
         await db.run(`
           INSERT INTO students (
-            cu_id, student_name, course, branch, semester, section, email, phone,
-            overall_percentage, total_sessions, present_sessions, absent_sessions, last_updated
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?)
+            cu_id, student_name, roll_number, father_name, course, branch, semester, section,
+            email, phone, password_hash, overall_percentage, total_sessions, present_sessions,
+            absent_sessions, last_updated
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           cuId,
           studentName,
+          mapped.roll_number || cuId,
+          mapped.father_name || '',
           mapped.course || 'B.Tech',
-          mapped.branch || 'CSE',
-          mapped.semester || '5',
+          mapped.branch || mapped.course || 'General',
+          mapped.semester || '1',
           mapped.section || 'A',
           mapped.email || `${cuId.toLowerCase()}@college.edu`,
           mapped.phone || '',
+          studentPasswordHash,
+          finalPercentage,
+          totalHeld,
+          totalPres,
+          totalAbs,
           now
         ]);
       }
       studentsUpdated++;
     }
 
-    // 2. Process Attendance Sheet
+    // 2. Process Separate Attendance Sheet (if provided)
     for (let i = 0; i < attendanceRows.length; i++) {
       const raw = attendanceRows[i];
       const mapped = this.mapRowFields(raw, [
-        'cu_id', 'attendance_date', 'subject', 'total_sessions', 'present_sessions', 'absent_sessions', 'attendance_percentage', 'status'
+        'cu_id', 'roll_number', 'attendance_date', 'subject', 'total_sessions',
+        'present_sessions', 'absent_sessions', 'attendance_percentage', 'status'
       ]);
 
-      const cuId = mapped.cu_id ? String(mapped.cu_id).trim().toUpperCase() : null;
+      const cuId = (mapped.cu_id || mapped.roll_number) ? String(mapped.cu_id || mapped.roll_number).trim().toUpperCase() : null;
       const date = this.formatDate(mapped.attendance_date);
-      const subject = mapped.subject ? String(mapped.subject).trim() : 'General Attendance';
+      const subject = mapped.subject ? String(mapped.subject).trim() : 'Special Class';
 
       if (!cuId) {
         errors.push({
@@ -301,17 +435,6 @@ export class ExcelProcessor {
       if (isNaN(present)) present = isNaN(absent) ? total : Math.max(0, total - absent);
       if (isNaN(absent)) absent = Math.max(0, total - present);
 
-      if (present > total) {
-        errors.push({
-          sheet_name: 'Attendance',
-          row_number: i + 2,
-          cu_id: cuId,
-          error_message: `Present sessions (${present}) cannot exceed total sessions (${total})`,
-          raw_data: JSON.stringify(raw),
-        });
-        continue;
-      }
-
       const calculatedPct = total > 0 ? Math.round(((present / total) * 100) * 10) / 10 : 0;
       let pct = parseFloat(mapped.attendance_percentage);
       if (isNaN(pct) || pct < 0 || pct > 100) {
@@ -322,15 +445,16 @@ export class ExcelProcessor {
 
       affectedCuIds.add(cuId);
 
-      // Check existing student; if student does not exist, create stub record
+      // Check student existence
       const studentExists = await db.get('SELECT cu_id FROM students WHERE cu_id = ?', [cuId]);
       if (!studentExists) {
+        const studentPasswordHash = hashPassword(cuId);
         await db.run(`
           INSERT INTO students (
-            cu_id, student_name, course, branch, semester, section,
+            cu_id, student_name, course, branch, semester, section, password_hash,
             overall_percentage, total_sessions, present_sessions, absent_sessions, last_updated
-          ) VALUES (?, ?, 'B.Tech', 'CSE', '5', 'A', 0, 0, 0, 0, ?)
-        `, [cuId, `Student ${cuId}`, now]);
+          ) VALUES (?, ?, 'Course', 'General', '1', 'A', ?, 0, 0, 0, 0, ?)
+        `, [cuId, `Student ${cuId}`, studentPasswordHash, now]);
       }
 
       // Check existing record for idempotency
@@ -361,7 +485,7 @@ export class ExcelProcessor {
       attendanceUpdated++;
     }
 
-    // 3. Process Assignments Sheet
+    // 3. Process Assignments Sheet (if present)
     for (let i = 0; i < assignmentRows.length; i++) {
       const raw = assignmentRows[i];
       const mapped = this.mapRowFields(raw, [
@@ -387,7 +511,6 @@ export class ExcelProcessor {
       }
 
       let status = mapped.submission_status ? String(mapped.submission_status).trim() : 'Pending';
-      // Normalize status
       const lowerStatus = status.toLowerCase();
       if (lowerStatus.includes('submit')) status = 'Submitted';
       else if (lowerStatus.includes('late')) status = 'Late';
@@ -402,15 +525,15 @@ export class ExcelProcessor {
       // Verify student existence
       const studentExists = await db.get('SELECT cu_id FROM students WHERE cu_id = ?', [cuId]);
       if (!studentExists) {
+        const studentPasswordHash = hashPassword(cuId);
         await db.run(`
           INSERT INTO students (
-            cu_id, student_name, course, branch, semester, section,
+            cu_id, student_name, course, branch, semester, section, password_hash,
             overall_percentage, total_sessions, present_sessions, absent_sessions, last_updated
-          ) VALUES (?, ?, 'B.Tech', 'CSE', '5', 'A', 0, 0, 0, 0, ?)
-        `, [cuId, `Student ${cuId}`, now]);
+          ) VALUES (?, ?, 'Course', 'General', '1', 'A', ?, 0, 0, 0, 0, ?)
+        `, [cuId, `Student ${cuId}`, studentPasswordHash, now]);
       }
 
-      // Check existing assignment by CU_ID and Assignment_ID
       const existingAssign = await db.get(
         'SELECT id FROM assignments WHERE cu_id = ? AND assignment_id = ?',
         [cuId, assignId]
@@ -439,40 +562,7 @@ export class ExcelProcessor {
       assignmentsUpdated++;
     }
 
-    // 4. Recalculate overall attendance percentage accurately for all affected students
-    for (const cuId of affectedCuIds) {
-      const records = await db.all(`
-        SELECT total_sessions, present_sessions, absent_sessions
-        FROM attendance_records
-        WHERE cu_id = ?
-      `, [cuId]);
-
-      if (records && records.length > 0) {
-        let totalHeld = 0;
-        let totalPresent = 0;
-        let totalAbsent = 0;
-
-        for (const rec of records) {
-          totalHeld += Number(rec.total_sessions || 0);
-          totalPresent += Number(rec.present_sessions || 0);
-          totalAbsent += Number(rec.absent_sessions || 0);
-        }
-
-        const overallPct = totalHeld > 0 ? Math.round(((totalPresent / totalHeld) * 100) * 10) / 10 : 0;
-
-        await db.run(`
-          UPDATE students SET
-            total_sessions = ?,
-            present_sessions = ?,
-            absent_sessions = ?,
-            overall_percentage = ?,
-            last_updated = ?
-          WHERE cu_id = ?
-        `, [totalHeld, totalPresent, totalAbsent, overallPct, now, cuId]);
-      }
-    }
-
-    // 5. Save Import Job Record
+    // 4. Save Import Job Record
     const status = errors.length === 0 ? 'success' : (studentsUpdated + attendanceUpdated + assignmentsUpdated > 0 ? 'partial' : 'failed');
     await db.run(`
       INSERT INTO import_jobs (
@@ -484,23 +574,13 @@ export class ExcelProcessor {
       studentsUpdated, attendanceUpdated, assignmentsUpdated, errors.length, now
     ]);
 
-    // 6. Save Import Errors if any
+    // 5. Save Errors if any
     for (const err of errors) {
       await db.run(`
         INSERT INTO import_errors (id, job_id, sheet_name, row_number, cu_id, error_message, raw_data)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `, [uuidv4(), jobId, err.sheet_name, err.row_number, err.cu_id, err.error_message, err.raw_data]);
     }
-
-    // 7. Save Audit Log
-    await db.run(`
-      INSERT INTO audit_logs (id, user_id, action, details, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `, [
-      uuidv4(), uploadedBy, 'EXCEL_IMPORT',
-      `Imported ${filename}: ${studentsUpdated} students, ${attendanceUpdated} attendance rows, ${assignmentsUpdated} assignments, ${errors.length} errors`,
-      now
-    ]);
 
     return {
       jobId,
@@ -516,7 +596,7 @@ export class ExcelProcessor {
     };
   }
 
-  // Generate official downloadable Excel Template (.xlsx) with ExcelJS
+  // Generate official downloadable Excel Template (.xlsx) matching user columns
   static async generateOfficialTemplate() {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'College ERP Administration';
@@ -534,78 +614,66 @@ export class ExcelProcessor {
       },
     };
 
-    // Sheet 1: Students
-    const studentSheet = workbook.addWorksheet('Students', {
+    // Primary Sheet: Student Attendance Master (Format requested by User)
+    const masterSheet = workbook.addWorksheet('Attendance_Master', {
       views: [{ state: 'frozen', ySplit: 1 }],
     });
-    studentSheet.columns = [
-      { header: 'CU_ID', key: 'cu_id', width: 16 },
-      { header: 'Student_Name', key: 'student_name', width: 26 },
+
+    masterSheet.columns = [
+      { header: 'Roll_Number', key: 'roll_number', width: 14 },
+      { header: 'Student_ID', key: 'student_id', width: 16 },
+      { header: 'Student_Name', key: 'student_name', width: 24 },
+      { header: 'Father_Name', key: 'father_name', width: 22 },
       { header: 'Course', key: 'course', width: 14 },
-      { header: 'Branch', key: 'branch', width: 22 },
       { header: 'Semester', key: 'semester', width: 12 },
-      { header: 'Section', key: 'section', width: 12 },
-      { header: 'Email', key: 'email', width: 28 },
-      { header: 'Phone', key: 'phone', width: 16 },
+      { header: 'Section', key: 'section', width: 10 },
+      { header: 'Class_Conducted', key: 'class_conducted', width: 16 },
+      { header: 'Total_Present', key: 'total_present', width: 14 },
+      { header: 'Total_Percentage', key: 'total_percentage', width: 18 },
+      { header: '15/10/2024', key: 'date_1', width: 14 },
+      { header: '16/10/2024', key: 'date_2', width: 14 },
+      { header: '17/10/2024', key: 'date_3', width: 14 },
+      { header: '18/10/2024', key: 'date_4', width: 14 },
+      { header: '19/10/2024', key: 'date_5', width: 14 },
     ];
-    studentSheet.getRow(1).eachCell(cell => Object.assign(cell, headerStyle));
-    studentSheet.addRows([
-      { cu_id: 'CU2024001', student_name: 'Aarav Sharma', course: 'B.Tech', branch: 'Computer Science', semester: '5', section: 'A', email: 'aarav.sharma@college.edu', phone: '9876543210' },
-      { cu_id: 'CU2024002', student_name: 'Ananya Verma', course: 'B.Tech', branch: 'Artificial Intelligence', semester: '5', section: 'B', email: 'ananya.v@college.edu', phone: '9876543211' },
-      { cu_id: 'CU2024003', student_name: 'Rahul Raj', course: 'B.Tech', branch: 'Computer Science', semester: '5', section: 'A', email: 'rahul.raj@college.edu', phone: '9876543212' },
-      { cu_id: 'CU2024004', student_name: 'Priya Nair', course: 'B.Tech', branch: 'Information Technology', semester: '5', section: 'A', email: 'priya.nair@college.edu', phone: '9876543213' },
-      { cu_id: 'CU2024005', student_name: 'Dev Patel', course: 'B.Tech', branch: 'Electronics & Comm', semester: '5', section: 'C', email: 'dev.patel@college.edu', phone: '9876543214' },
-    ]);
 
-    // Sheet 2: Attendance
-    const attendSheet = workbook.addWorksheet('Attendance', {
-      views: [{ state: 'frozen', ySplit: 1 }],
-    });
-    attendSheet.columns = [
-      { header: 'CU_ID', key: 'cu_id', width: 16 },
-      { header: 'Attendance_Date', key: 'attendance_date', width: 18 },
-      { header: 'Subject', key: 'subject', width: 28 },
-      { header: 'Total_Sessions', key: 'total_sessions', width: 16 },
-      { header: 'Present_Sessions', key: 'present_sessions', width: 16 },
-      { header: 'Absent_Sessions', key: 'absent_sessions', width: 16 },
-      { header: 'Attendance_Percentage', key: 'attendance_percentage', width: 22 },
-      { header: 'Status', key: 'status', width: 14 },
-    ];
-    attendSheet.getRow(1).eachCell(cell => Object.assign(cell, headerStyle));
-    attendSheet.addRows([
-      { cu_id: 'CU2024001', attendance_date: '2026-10-17', subject: 'Machine Learning', total_sessions: 2, present_sessions: 2, absent_sessions: 0, attendance_percentage: 100, status: 'Present' },
-      { cu_id: 'CU2024001', attendance_date: '2026-10-16', subject: 'Distributed Systems', total_sessions: 2, present_sessions: 2, absent_sessions: 0, attendance_percentage: 100, status: 'Present' },
-      { cu_id: 'CU2024001', attendance_date: '2026-10-15', subject: 'Cloud Computing Lab', total_sessions: 3, present_sessions: 3, absent_sessions: 0, attendance_percentage: 100, status: 'Present' },
-      { cu_id: 'CU2024001', attendance_date: '2026-10-14', subject: 'Cyber Security', total_sessions: 2, present_sessions: 1, absent_sessions: 1, attendance_percentage: 50, status: 'Partial' },
-      { cu_id: 'CU2024001', attendance_date: '2026-10-13', subject: 'Software Architecture', total_sessions: 2, present_sessions: 2, absent_sessions: 0, attendance_percentage: 100, status: 'Present' },
-      { cu_id: 'CU2024003', attendance_date: '2026-10-17', subject: 'Machine Learning', total_sessions: 2, present_sessions: 2, absent_sessions: 0, attendance_percentage: 100, status: 'Present' },
-      { cu_id: 'CU2024003', attendance_date: '2026-10-16', subject: 'Distributed Systems', total_sessions: 2, present_sessions: 2, absent_sessions: 0, attendance_percentage: 100, status: 'Present' },
-      { cu_id: 'CU2024003', attendance_date: '2026-10-15', subject: 'Cloud Computing Lab', total_sessions: 3, present_sessions: 2, absent_sessions: 1, attendance_percentage: 66.7, status: 'Partial' },
-      { cu_id: 'CU2024003', attendance_date: '2026-10-14', subject: 'Cyber Security', total_sessions: 2, present_sessions: 2, absent_sessions: 0, attendance_percentage: 100, status: 'Present' },
-      { cu_id: 'CU2024003', attendance_date: '2026-10-13', subject: 'Software Architecture', total_sessions: 2, present_sessions: 2, absent_sessions: 0, attendance_percentage: 100, status: 'Present' },
-    ]);
+    masterSheet.getRow(1).eachCell(cell => Object.assign(cell, headerStyle));
 
-    // Sheet 3: Assignments
-    const assignSheet = workbook.addWorksheet('Assignments', {
-      views: [{ state: 'frozen', ySplit: 1 }],
-    });
-    assignSheet.columns = [
-      { header: 'CU_ID', key: 'cu_id', width: 16 },
-      { header: 'Assignment_ID', key: 'assignment_id', width: 16 },
-      { header: 'Assignment_Name', key: 'assignment_name', width: 34 },
-      { header: 'Subject', key: 'subject', width: 28 },
-      { header: 'Submission_Deadline', key: 'submission_deadline', width: 20 },
-      { header: 'Submission_Status', key: 'submission_status', width: 20 },
-      { header: 'Submission_Date', key: 'submission_date', width: 18 },
-      { header: 'Remarks', key: 'remarks', width: 30 },
-    ];
-    assignSheet.getRow(1).eachCell(cell => Object.assign(cell, headerStyle));
-    assignSheet.addRows([
-      { cu_id: 'CU2024001', assignment_id: 'ASN-ML-01', assignment_name: 'Special Assignment: Neural Network Backprop', subject: 'Machine Learning', submission_deadline: '2026-10-25', submission_status: 'Submitted', submission_date: '2026-10-16', remarks: 'Verified by Prof. Sharma' },
-      { cu_id: 'CU2024001', assignment_id: 'ASN-DS-02', assignment_name: 'Raft Consensus Protocol Simulation', subject: 'Distributed Systems', submission_deadline: '2026-10-28', submission_status: 'Pending', submission_date: '', remarks: 'Initial draft received' },
-      { cu_id: 'CU2024003', assignment_id: 'ASN-ML-01', assignment_name: 'Special Assignment: Neural Network Backprop', subject: 'Machine Learning', submission_deadline: '2026-10-25', submission_status: 'Submitted', submission_date: '2026-10-15', remarks: 'Grade A+ awarded' },
-      { cu_id: 'CU2024003', assignment_id: 'ASN-DS-02', assignment_name: 'Raft Consensus Protocol Simulation', subject: 'Distributed Systems', submission_deadline: '2026-10-28', submission_status: 'Submitted', submission_date: '2026-10-16', remarks: 'Excellent implementation' },
-      { cu_id: 'CU2024003', assignment_id: 'ASN-CS-03', assignment_name: 'Vulnerability Assessment Audit Report', subject: 'Cyber Security', submission_deadline: '2026-10-22', submission_status: 'Pending', submission_date: '', remarks: 'Submission required by Friday' },
+    masterSheet.addRows([
+      {
+        roll_number: '101',
+        student_id: 'CU2024001',
+        student_name: 'Rahul Raj',
+        father_name: 'R. K. Sharma',
+        course: 'B.Tech',
+        semester: '5',
+        section: 'A',
+        class_conducted: 20,
+        total_present: 18,
+        total_percentage: 90,
+        date_1: 'P',
+        date_2: 'P',
+        date_3: 'P',
+        date_4: 'P',
+        date_5: 'P',
+      },
+      {
+        roll_number: '102',
+        student_id: 'CU2024002',
+        student_name: 'Aarav Sharma',
+        father_name: 'S. K. Sharma',
+        course: 'B.Tech',
+        semester: '5',
+        section: 'A',
+        class_conducted: 20,
+        total_present: 19,
+        total_percentage: 95,
+        date_1: 'P',
+        date_2: 'P',
+        date_3: 'P',
+        date_4: 'P',
+        date_5: 'P',
+      },
     ]);
 
     return await workbook.xlsx.writeBuffer();

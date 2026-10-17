@@ -211,9 +211,10 @@ export const AdminStudents: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-900/90 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider">
               <tr>
-                <th className="py-3.5 px-4">CU ID</th>
+                <th className="py-3.5 px-4">Student ID / Roll No</th>
                 <th className="py-3.5 px-4">Student Name</th>
-                <th className="py-3.5 px-4">Dept / Sem / Sec</th>
+                <th className="py-3.5 px-4">Father's Name</th>
+                <th className="py-3.5 px-4">Course / Sem / Sec</th>
                 <th className="py-3.5 px-4 text-center">Sessions (P / Total)</th>
                 <th className="py-3.5 px-4 text-center">Overall %</th>
                 <th className="py-3.5 px-4 text-center">Standing</th>
@@ -223,14 +224,14 @@ export const AdminStudents: React.FC = () => {
             <tbody className="divide-y divide-slate-800/60 text-slate-200">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-500">
+                  <td colSpan={8} className="py-12 text-center text-slate-500">
                     Loading student records...
                   </td>
                 </tr>
               ) : students.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-500">
-                    No matching student records found.
+                  <td colSpan={8} className="py-12 text-center text-slate-500">
+                    No student records found. Upload an Excel spreadsheet to import students.
                   </td>
                 </tr>
               ) : (
@@ -239,14 +240,20 @@ export const AdminStudents: React.FC = () => {
                   const isSafe = pct >= 75;
                   return (
                     <tr key={student.cu_id} className="hover:bg-slate-800/40 transition">
-                      <td className="py-3.5 px-4 font-mono font-semibold text-sky-400">
-                        {student.cu_id}
+                      <td className="py-3.5 px-4 font-mono">
+                        <span className="font-semibold text-sky-400">{student.cu_id}</span>
+                        {student.roll_number && student.roll_number !== student.cu_id && (
+                          <span className="block text-[11px] text-slate-400">Roll: {student.roll_number}</span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 font-medium text-white">
                         {student.student_name}
                       </td>
+                      <td className="py-3.5 px-4 text-slate-300">
+                        {student.father_name || '—'}
+                      </td>
                       <td className="py-3.5 px-4 text-slate-400">
-                        {student.branch} • Sem {student.semester}-{student.section}
+                        {student.course} • Sem {student.semester}-{student.section}
                       </td>
                       <td className="py-3.5 px-4 text-center font-mono">
                         <span className="text-emerald-400">{student.present_sessions}</span> /{' '}

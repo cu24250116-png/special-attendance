@@ -82,6 +82,16 @@ export const api = {
       body: JSON.stringify({ cu_id, otp }),
     }),
 
+  studentLogin: (cu_id: string, password: string) =>
+    request<{
+      success: boolean;
+      token: string;
+      student: Student;
+    }>('/auth/student/login', {
+      method: 'POST',
+      body: JSON.stringify({ cu_id, password }),
+    }),
+
   // Student Endpoints
   getStudentProfile: (cu_id: string) =>
     request<{ student: Student }>(`/students/${encodeURIComponent(cu_id)}`),

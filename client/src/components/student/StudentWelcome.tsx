@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UserCheck, ArrowRight, ShieldCheck, KeyRound, AlertCircle, Sparkles, School } from 'lucide-react';
+import { UserCheck, Lock, Eye, EyeOff, ArrowRight, School, AlertCircle, Info } from 'lucide-react';
 import { api } from '../../services/api';
 
 interface StudentWelcomeProps {
@@ -8,66 +8,52 @@ interface StudentWelcomeProps {
 
 export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }) => {
   const [cuId, setCuId] = useState('');
-  const [step, setStep] = useState<'lookup' | 'verify'>('lookup');
-  const [otp, setOtp] = useState('');
-  const [generatedCode, setGeneratedCode] = useState('');
-  const [lookupData, setLookupData] = useState<any>(null);
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const demoStudents = [
-    { cu_id: 'CU2024001', name: 'Rahul Raj', branch: 'CSE (92% Safe)' },
-    { cu_id: 'CU2024002', name: 'Aarav Sharma', branch: 'CSE (95% Top)' },
-    { cu_id: 'CU2024003', name: 'Ananya Verma', branch: 'AI/ML (85%)' },
-    { cu_id: 'CU2024005', name: 'Dev Patel', branch: 'ECE (54% Defaulter)' },
-  ];
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetId = cuId.trim().toUpperCase();
+    const targetPassword = password.trim();
 
-  const handleLookup = async (idToLookup?: string) => {
-    const targetId = (idToLookup || cuId).trim().toUpperCase();
     if (!targetId) {
-      setError('Please enter your valid College University ID (e.g. CU2024001)');
+      setError('Please enter your Student ID / CU ID.');
+      return;
+    }
+    if (!targetPassword) {
+      setError('Please enter your Password (default is your Student ID / CU ID).');
       return;
     }
 
     setError(null);
     setLoading(true);
     try {
-      const data = await api.studentLookup(targetId);
-      setLookupData(data);
-      setGeneratedCode(data.demoCode);
-      setStep('verify');
+      const data = await api.studentLogin(targetId, targetPassword);
+      localStorage.setItem('college_student_token', data.token);
+      localStorage.setItem('college_student_cuid', data.student.cu_id);
+      onLoginSuccess(data.student.cu_id, data.token);
     } catch (err: any) {
-      setError(err.message || 'Student not found in college records.');
+      setError(err.message || 'Login failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleVerify = async (codeToUse?: string) => {
-    const code = (codeToUse || otp).trim();
-    if (!code) {
-      setError('Please enter the 6-digit verification code.');
-      return;
-    }
-
-    setError(null);
-    setLoading(true);
-    try {
-      const data = await api.studentVerify(lookupData.cu_id, code);
-      localStorage.setItem('college_student_token', data.token);
-      localStorage.setItem('college_student_cuid', data.student.cu_id);
-      onLoginSuccess(data.student.cu_id, data.token);
-    } catch (err: any) {
-      setError(err.message || 'Verification failed. Please check the OTP code.');
-    } finally {
-      setLoading(false);
+  // Quick helper to fill password when CU ID changes if password is empty
+  const handleCuIdChange = (val: string) => {
+    const uppercaseVal = val.toUpperCase();
+    setCuId(uppercaseVal);
+    // If password hasn't been manually set or matches old CU ID, keep it in sync
+    if (!password || password === cuId) {
+      setPassword(uppercaseVal);
     }
   };
 
   return (
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4">
       <div className="max-w-md w-full">
-        {/* Welcome Card */}
         <div className="glass-panel rounded-2xl p-6 sm:p-8 shadow-2xl border border-slate-800 relative overflow-hidden">
           {/* Subtle Glow backdrop */}
           <div className="absolute -top-24 -right-24 w-48 h-48 bg-blue-600/20 rounded-full blur-3xl pointer-events-none" />
@@ -87,159 +73,94 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
               Student Attendance Portal
             </h1>
             <p className="text-sm text-slate-400 mt-2">
-              Check your real-time attendance sessions and special assignment submission status.
+              Sign in with your Student ID and Password to check your real-time attendance and special class records.
             </p>
           </div>
 
           {error && (
-            <div className="mb-6 p-3.5 rounded-xl bg-red-950/60 border border-red-800/60 text-red-200 text-sm flex items-start space-x-2.5 animate-fadeIn">
-              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="mb-6 p-3.5 rounded-xl bg-red-950/60 border border-red-800/60 text-red-200 text-xs flex items-start space-x-2.5 animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
 
-          {step === 'lookup' ? (
-            /* STEP 1: Enter CU ID */
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleLookup();
-              }}
-              className="space-y-5"
-            >
-              <div>
-                <label htmlFor="cu_id_input" className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-2">
-                  College University ID (CU ID)
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label htmlFor="student_id_input" className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                Student ID / CU ID / Roll Number
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <UserCheck className="w-5 h-5 text-slate-400" />
+                </div>
+                <input
+                  id="student_id_input"
+                  type="text"
+                  value={cuId}
+                  onChange={(e) => handleCuIdChange(e.target.value)}
+                  placeholder="Enter Student ID / CU ID"
+                  className="w-full pl-11 pr-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono tracking-wider text-sm transition"
+                  autoFocus
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label htmlFor="student_password_input" className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
+                  Password
                 </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                    <UserCheck className="w-5 h-5 text-slate-400" />
-                  </div>
-                  <input
-                    id="cu_id_input"
-                    type="text"
-                    value={cuId}
-                    onChange={(e) => setCuId(e.target.value.toUpperCase())}
-                    placeholder="e.g. CU2024001"
-                    className="w-full pl-11 pr-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono tracking-wider text-sm transition"
-                    autoFocus
-                  />
+                <span className="text-[11px] text-sky-400 font-medium">
+                  Default: Same as Student ID
+                </span>
+              </div>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <Lock className="w-5 h-5 text-slate-400" />
                 </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading || !cuId.trim()}
-                className="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-600 hover:from-blue-500 hover:to-sky-500 text-white font-medium rounded-xl shadow-lg shadow-blue-900/30 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed transition transform active:scale-[0.99]"
-              >
-                <span>{loading ? 'Verifying Student ID...' : 'Continue to Dashboard'}</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-
-              {/* Sample Quick-Click Chips */}
-              <div className="pt-4 border-t border-slate-800">
-                <p className="text-xs text-slate-400 font-medium mb-3 flex items-center justify-between">
-                  <span>Quick Test with Enrolled Students:</span>
-                  <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  {demoStudents.map((s) => (
-                    <button
-                      key={s.cu_id}
-                      type="button"
-                      onClick={() => {
-                        setCuId(s.cu_id);
-                        handleLookup(s.cu_id);
-                      }}
-                      className="text-left p-2.5 rounded-lg bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 hover:border-blue-500/50 transition group"
-                    >
-                      <div className="text-xs font-semibold text-white group-hover:text-sky-300 font-mono">
-                        {s.cu_id}
-                      </div>
-                      <div className="text-[11px] text-slate-400 truncate">{s.name}</div>
-                      <div className="text-[10px] text-blue-400/80">{s.branch}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </form>
-          ) : (
-            /* STEP 2: 2FA Verification */
-            <div className="space-y-5 animate-fadeIn">
-              <div className="p-3.5 rounded-xl bg-blue-950/40 border border-blue-800/40 text-blue-200 text-xs">
-                <p className="font-semibold text-white mb-1">
-                  Verified: {lookupData.studentName} ({lookupData.cu_id})
-                </p>
-                <p className="text-blue-300">
-                  {lookupData.course} {lookupData.branch} • Semester {lookupData.semester} • Section {lookupData.section}
-                </p>
-              </div>
-
-              <div>
-                <label htmlFor="otp_input" className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-2">
-                  Enter 6-Digit Verification PIN
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                    <KeyRound className="w-5 h-5 text-slate-400" />
-                  </div>
-                  <input
-                    id="otp_input"
-                    type="text"
-                    maxLength={6}
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value)}
-                    placeholder="Enter PIN (e.g. 123456)"
-                    className="w-full pl-11 pr-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-center font-mono tracking-widest text-lg transition"
-                    autoFocus
-                  />
-                </div>
-              </div>
-
-              {/* 1-Click Auto Verify for Evaluation Ease */}
-              <div className="flex space-x-2">
+                <input
+                  id="student_password_input"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter Password (CU ID)"
+                  className="w-full pl-11 pr-11 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono tracking-wider text-sm transition"
+                  required
+                />
                 <button
                   type="button"
-                  onClick={() => {
-                    const code = generatedCode || '123456';
-                    setOtp(code);
-                    handleVerify(code);
-                  }}
-                  className="flex-1 py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-sky-300 text-xs font-medium rounded-lg border border-slate-700 flex items-center justify-center space-x-1.5 transition"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-white"
+                  tabIndex={-1}
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                  <span>One-Click Verify ({generatedCode || '123456'})</span>
-                </button>
-              </div>
-
-              <div className="flex space-x-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStep('lookup');
-                    setError(null);
-                  }}
-                  className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium rounded-xl transition"
-                >
-                  Back
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleVerify()}
-                  disabled={loading || !otp.trim()}
-                  className="flex-1 py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium rounded-xl shadow-lg shadow-blue-900/30 flex items-center justify-center space-x-2 disabled:opacity-50 transition"
-                >
-                  <span>{loading ? 'Authenticating...' : 'Access My Dashboard'}</span>
-                  <ShieldCheck className="w-4 h-4" />
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
-          )}
+
+            {/* Note box */}
+            <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-800/40 text-blue-200 text-xs flex items-start space-x-2">
+              <Info className="w-4 h-4 text-sky-400 flex-shrink-0 mt-0.5" />
+              <p>
+                As configured by the college, your default password is your <strong>Student ID / CU ID</strong> from the official imported Excel sheet.
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || !cuId.trim() || !password.trim()}
+              className="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-600 hover:from-blue-500 hover:to-sky-500 text-white font-medium rounded-xl shadow-lg shadow-blue-900/30 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed transition transform active:scale-[0.99] mt-2"
+            >
+              <span>{loading ? 'Authenticating Student...' : 'Sign In to Dashboard'}</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </form>
 
           {/* Footer note */}
           <div className="mt-8 pt-4 border-t border-slate-800/80 text-center">
             <p className="text-[11px] text-slate-500">
-              Protected by College ERP Single Sign-On & Verification Protocol. Real-time encrypted connection.
+              Only records officially uploaded by the College Administrator via Excel will be available.
             </p>
           </div>
         </div>

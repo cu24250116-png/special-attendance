@@ -98,19 +98,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             </div>
 
-            {/* Quick Demo Helpers (if not logged in) */}
-            {currentView === 'student' && !studentCuId && (
-              <button
-                type="button"
-                onClick={() => onQuickDemoStudent('CU2024001')}
-                className="hidden lg:flex items-center space-x-1 px-2.5 py-1.5 bg-blue-900/30 hover:bg-blue-900/50 text-blue-300 border border-blue-700/40 rounded-lg text-xs font-medium transition"
-                title="Log in as Rahul Raj (92% attendance)"
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>Demo Student</span>
-              </button>
-            )}
-
+            {/* Admin Quick Login Helper (if not logged in) */}
             {currentView === 'admin' && !adminUser && (
               <button
                 type="button"

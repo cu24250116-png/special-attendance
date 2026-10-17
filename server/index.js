@@ -199,6 +199,70 @@ app.post('/api/auth/student/verify', rateLimitMiddleware(20, 60000), async (req,
   });
 });
 
+// Student Direct Login (CU ID + Password = CU ID)
+app.post('/api/auth/student/login', rateLimitMiddleware(30, 60000), async (req, res) => {
+  const { cu_id, password } = req.body;
+  if (!cu_id || !password) {
+    return res.status(400).json({ error: 'Please enter both CU ID / Student ID and Password.' });
+  }
+
+  const normalized = cu_id.toUpperCase().trim();
+  const inputPassword = password.trim();
+
+  // Find student by cu_id or roll_number
+  const student = await db.get(
+    'SELECT * FROM students WHERE UPPER(cu_id) = ? OR UPPER(roll_number) = ?',
+    [normalized, normalized]
+  );
+
+  if (!student) {
+    return res.status(404).json({
+      error: `Student record for "${normalized}" was not found. Please verify your Student ID / CU ID or contact college administration.`,
+    });
+  }
+
+  // Password verification:
+  // By default, the student's password is their CU ID (case-insensitive) or roll_number or bcrypt-hashed password
+  const isMatch =
+    inputPassword.toUpperCase() === student.cu_id.toUpperCase() ||
+    (student.roll_number && inputPassword.toUpperCase() === student.roll_number.toUpperCase()) ||
+    (student.password_hash && comparePassword(inputPassword, student.password_hash));
+
+  if (!isMatch) {
+    return res.status(401).json({
+      error: 'Invalid password. Note: Your default password is your Student ID / CU ID.',
+    });
+  }
+
+  // Issue short-lived student session token
+  const token = generateToken({
+    cu_id: student.cu_id,
+    name: student.student_name,
+    role: 'student',
+  }, '24h');
+
+  res.json({
+    success: true,
+    message: 'Login successful',
+    token,
+    student: {
+      cu_id: student.cu_id,
+      student_name: student.student_name,
+      roll_number: student.roll_number,
+      father_name: student.father_name,
+      course: student.course,
+      branch: student.branch,
+      semester: student.semester,
+      section: student.section,
+      overall_percentage: student.overall_percentage,
+      total_sessions: student.total_sessions,
+      present_sessions: student.present_sessions,
+      absent_sessions: student.absent_sessions,
+      last_updated: student.last_updated,
+    },
+  });
+});
+
 // ==========================================
 // STUDENT PANEL ROUTES
 // ==========================================

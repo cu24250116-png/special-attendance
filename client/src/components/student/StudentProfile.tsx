@@ -37,12 +37,16 @@ export const StudentProfile: React.FC<StudentProfileProps> = ({ student }) => {
 
           <div className="space-y-3 text-xs divide-y divide-slate-800/80">
             <div className="pt-2 flex justify-between">
-              <span className="text-slate-400">Course / Program</span>
-              <span className="font-semibold text-white">{student.course}</span>
+              <span className="text-slate-400">Roll Number</span>
+              <span className="font-semibold text-sky-400 font-mono">{student.roll_number || '—'}</span>
             </div>
             <div className="pt-2 flex justify-between">
-              <span className="text-slate-400">Department / Branch</span>
-              <span className="font-semibold text-white">{student.branch}</span>
+              <span className="text-slate-400">Father's Name</span>
+              <span className="font-semibold text-white">{student.father_name || '—'}</span>
+            </div>
+            <div className="pt-2 flex justify-between">
+              <span className="text-slate-400">Course / Program</span>
+              <span className="font-semibold text-white">{student.course}</span>
             </div>
             <div className="pt-2 flex justify-between">
               <span className="text-slate-400">Current Semester</span>
@@ -51,12 +55,6 @@ export const StudentProfile: React.FC<StudentProfileProps> = ({ student }) => {
             <div className="pt-2 flex justify-between">
               <span className="text-slate-400">Class Section</span>
               <span className="font-semibold text-white">Section {student.section}</span>
-            </div>
-            <div className="pt-2 flex justify-between">
-              <span className="text-slate-400">Enrolled Email</span>
-              <span className="font-semibold text-sky-300 font-mono truncate max-w-[200px]">
-                {student.email || `${student.cu_id.toLowerCase()}@college.edu`}
-              </span>
             </div>
           </div>
         </div>
