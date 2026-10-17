@@ -1,0 +1,24 @@
+{
+  "name": "college-special-attendance-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "College Special Assignment & Attendance Dashboard with Realtime Sync",
+  "scripts": {
+    "dev": "node dev-runner.js",
+    "dev:client": "npm.cmd --prefix client run dev",
+    "dev:server": "npm.cmd --prefix server run dev",
+    "build": "npm.cmd --prefix client run build",
+    "start": "node server/index.js",
+    "test": "node server/test.js"
+  },
+  "keywords": [
+    "attendance",
+    "college",
+    "erp",
+    "excel",
+    "realtime",
+    "dashboard"
+  ],
+  "author": "College ERP Team",
+  "license": "MIT"
+}
