@@ -57,8 +57,65 @@ export async function seedDatabase() {
   // Remove any legacy admin placeholder
   await db.run('DELETE FROM users WHERE LOWER(email) = ?', ['admin@college.edu']);
 
-  // Preserve real imported data: we do NOT wipe students or attendance records on server restart!
-  console.log('Database verification: Preserving all imported student and attendance records.');
+  // 2. Auto-seed student dataset into database if empty or missing
+  const studentCount = await db.get('SELECT COUNT(*) as count FROM students');
+  const count = studentCount ? Number(studentCount.count) : 0;
+  if (count < 100) {
+    const seedFile = path.join(__dirname, '..', 'data', 'master_seed.json');
+    if (fs.existsSync(seedFile)) {
+      console.log(`Database has only ${count} students. Seeding 1,367 official students from master_seed.json...`);
+      const seedData = JSON.parse(fs.readFileSync(seedFile, 'utf8'));
+
+      db.startBatch();
+      for (const s of (seedData.students || [])) {
+        await db.run(`
+          INSERT INTO students (
+            cu_id, student_name, roll_number, father_name, course, branch,
+            semester, section, email, phone, password_hash, overall_percentage,
+            total_sessions, present_sessions, absent_sessions, last_updated,
+            import_job_id, password_changed
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          s.cu_id, s.student_name, s.roll_number, s.father_name, s.course, s.branch,
+          s.semester, s.section, s.email, s.phone, s.password_hash, s.overall_percentage,
+          s.total_sessions, s.present_sessions, s.absent_sessions, s.last_updated,
+          s.import_job_id, s.password_changed || 0
+        ]);
+      }
+
+      for (const a of (seedData.attendance || [])) {
+        await db.run(`
+          INSERT INTO attendance_records (
+            id, cu_id, attendance_date, subject, total_sessions, present_sessions,
+            absent_sessions, attendance_percentage, status, created_at,
+            assignments_uploaded, import_job_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          a.id, a.cu_id, a.attendance_date, a.subject || 'Special Class',
+          a.total_sessions || 1, a.present_sessions || 1, a.absent_sessions || 0,
+          a.attendance_percentage || 100, a.status, a.created_at,
+          a.assignments_uploaded || 0, a.import_job_id || null
+        ]);
+      }
+
+      for (const as of (seedData.assignments || [])) {
+        await db.run(`
+          INSERT INTO assignments (
+            id, assignment_id, cu_id, assignment_name, subject, submission_deadline,
+            submission_status, submission_date, remarks, created_at, import_job_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          as.id, as.assignment_id, as.cu_id, as.assignment_name, as.subject || 'Special Class',
+          as.submission_deadline, as.submission_status, as.submission_date, as.remarks,
+          as.created_at, as.import_job_id
+        ]);
+      }
+      db.endBatch();
+      console.log(`Database successfully populated with ${seedData.students?.length || 0} students and attendance history.`);
+    }
+  } else {
+    console.log(`Database verification: Preserving all ${count} student records intact.`);
+  }
 
   // 3. Generate Official Excel Template matching user requirements
   const sampleMasterFile = path.join(SAMPLES_DIR, 'College_Master_Import.xlsx');

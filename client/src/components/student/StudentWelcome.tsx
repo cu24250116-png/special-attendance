@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { UserCheck, Lock, Eye, EyeOff, ArrowRight, School, AlertCircle, Info, Smartphone, Key, CheckCircle2, ArrowLeft, Server, Wifi, RefreshCw, X } from 'lucide-react';
+import React, { useState } from 'react';
+import { UserCheck, Lock, Eye, EyeOff, ArrowRight, School, AlertCircle, Info, Smartphone, Key, CheckCircle2, ArrowLeft } from 'lucide-react';
 import { api, isNativeApp } from '../../services/api';
 
 interface StudentWelcomeProps {
-  onLoginSuccess: (cuId: string, token: string) => void;
+  onLoginSuccess: (cuId: string, token: string, initialStudent?: any) => void;
 }
 
 export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }) => {
@@ -13,17 +13,6 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-  // Server Connection State
-  const [serverStatus, setServerStatus] = useState<{
-    online: boolean;
-    checking: boolean;
-    latencyMs?: number;
-    message?: string;
-  }>({
-    online: false,
-    checking: true,
-  });
 
   // Change Password state
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -36,22 +25,6 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
   const [changeError, setChangeError] = useState<string | null>(null);
 
   const isNative = isNativeApp();
-
-  const checkConnection = async (targetUrl?: string) => {
-    setServerStatus(prev => ({ ...prev, checking: true }));
-    const health = await api.checkServerHealth(targetUrl);
-    setServerStatus({
-      online: health.online,
-      checking: false,
-      latencyMs: health.latencyMs,
-      message: health.message,
-    });
-    return health;
-  };
-
-  useEffect(() => {
-    checkConnection();
-  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,7 +47,7 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
       const data = await api.studentLogin(targetId, targetPassword);
       localStorage.setItem('college_student_token', data.token);
       localStorage.setItem('college_student_cuid', data.student.cu_id);
-      onLoginSuccess(data.student.cu_id, data.token);
+      onLoginSuccess(data.student.cu_id, data.token, data.student);
     } catch (err: any) {
       setError(err.message || 'Login failed. Please check your credentials.');
     } finally {
@@ -392,54 +365,21 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
             </form>
           )}
 
-          {/* Android Mobile App APK Status / Download Banner */}
-          <div className="mt-5 pt-4 border-t border-slate-800/80 space-y-2.5">
-            {/* Live Server Connection Status Pill */}
-            <div className="w-full py-2.5 px-3.5 bg-slate-900/90 border border-slate-800 rounded-xl text-xs flex items-center justify-between shadow-sm">
-              <div className="flex items-center space-x-2 min-w-0">
-                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                  serverStatus.checking
-                    ? 'bg-amber-400 animate-pulse'
-                    : serverStatus.online
-                    ? 'bg-emerald-400 live-indicator'
-                    : 'bg-rose-500'
-                }`} />
-                <span className="text-slate-300 font-medium text-[11px] truncate">
-                  {serverStatus.checking
-                    ? 'Checking college server...'
-                    : serverStatus.online
-                    ? `Live Server: Connected (${serverStatus.latencyMs}ms)`
-                    : 'College Server Offline • Reconnecting...'}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => checkConnection()}
-                disabled={serverStatus.checking}
-                title="Check Connection"
-                className="ml-2 px-2.5 py-1 text-[11px] rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 font-semibold transition flex items-center space-x-1 flex-shrink-0 disabled:opacity-50"
+          {!isNative && (
+            <div className="mt-5 pt-4 border-t border-slate-800/80 space-y-2">
+              <a
+                href={api.downloadApkUrl}
+                download="SpecialAttendance.apk"
+                className="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition shadow-lg shadow-emerald-900/40 group active:scale-[0.99]"
               >
-                <RefreshCw className={`w-3 h-3 ${serverStatus.checking ? 'animate-spin' : ''}`} />
-                <span>{serverStatus.checking ? 'Checking...' : 'Refresh'}</span>
-              </button>
+                <Smartphone className="w-4 h-4 text-emerald-200 group-hover:scale-110 transition-transform" />
+                <span>Download Android App (.APK)</span>
+              </a>
+              <p className="text-[10px] text-slate-400 text-center">
+                Direct install on any Android phone • Live college sync
+              </p>
             </div>
-
-            {!isNative && (
-              <>
-                <a
-                  href={api.downloadApkUrl}
-                  download="SpecialAttendance.apk"
-                  className="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition shadow-lg shadow-emerald-900/40 group active:scale-[0.99]"
-                >
-                  <Smartphone className="w-4 h-4 text-emerald-200 group-hover:scale-110 transition-transform" />
-                  <span>Download Updated Android App (.APK)</span>
-                </a>
-                <p className="text-[10px] text-slate-400 text-center">
-                  Direct install on any Android phone • Auto-syncs with college admin
-                </p>
-              </>
-            )}
-          </div>
+          )}
 
           {/* Footer note */}
           <div className="mt-4 pt-3 border-t border-slate-800/50 text-center">

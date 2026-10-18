@@ -76,20 +76,12 @@ export function App() {
     let reconnectTimeout: any = null;
 
     const connectSSE = () => {
-      // In standalone APK mode without custom live server URL, master database is already fully loaded
-      const customUrl = localStorage.getItem('college_custom_api_url') || localStorage.getItem('custom_api_url');
-      if (isNativeApp() && (!customUrl || !customUrl.trim())) {
-        setIsRealtimeConnected(true);
-        return;
-      }
-
       const params = new URLSearchParams();
       if (studentCuId) params.append('cu_id', studentCuId);
       if (adminUser) params.append('role', 'admin');
 
       const base = getApiBase();
       const streamUrl = `${base}/realtime/stream?${params.toString()}`;
-
 
       try {
         eventSource = new EventSource(streamUrl);
@@ -145,19 +137,40 @@ export function App() {
       }
     };
 
-
     connectSSE();
+
+    // Re-fetch on window focus / app resume to ensure instant fresh data
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && studentCuId) {
+        fetchCurrentStudent();
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
+
+    // Periodic live sync poll every 15 seconds while active
+    const pollInterval = setInterval(() => {
+      if (studentCuId) {
+        fetchCurrentStudent();
+      }
+    }, 15000);
 
     return () => {
       if (eventSource) eventSource.close();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+      clearInterval(pollInterval);
     };
   }, [studentCuId, adminUser]);
 
   // Handlers for Student
-  const handleStudentLoginSuccess = (cuId: string, token: string) => {
+  const handleStudentLoginSuccess = (cuId: string, token: string, initialStudent?: Student) => {
     setStudentCuId(cuId);
     setStudentToken(token);
+    if (initialStudent) {
+      setStudentData(initialStudent);
+    }
     fetchCurrentStudent(cuId);
   };
 
@@ -276,6 +289,7 @@ export function App() {
                     student={studentData}
                     onNavigateTab={setStudentTab}
                     lastSyncNotice={lastSyncNotice}
+                    onRefreshStudent={() => fetchCurrentStudent()}
                   />
                 )}
                 {studentTab === 'attendance' && (

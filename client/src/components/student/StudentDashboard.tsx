@@ -18,7 +18,8 @@ import {
   Download,
   Megaphone,
   Bell,
-  X
+  X,
+  RefreshCw
 } from 'lucide-react';
 
 import confetti from 'canvas-confetti';
@@ -27,13 +28,16 @@ interface StudentDashboardProps {
   student: Student;
   onNavigateTab: (tab: 'attendance' | 'assignments' | 'profile') => void;
   lastSyncNotice: string | null;
+  onRefreshStudent?: () => Promise<void>;
 }
 
 export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   student,
   onNavigateTab,
   lastSyncNotice,
+  onRefreshStudent,
 }) => {
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [specialAttendance, setSpecialAttendance] = useState<SpecialClassAttendance | null>(
     student.special_class_attendance || null
   );
@@ -102,6 +106,24 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
     } catch {}
     if (activeNoticeIdx >= unreadNotices.length - 1) {
       setActiveNoticeIdx(0);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      if (onRefreshStudent) {
+        await onRefreshStudent();
+      }
+      const res = await api.getStudentAttendance(student.cu_id);
+      if (res.specialClassAttendance) {
+        setSpecialAttendance(res.specialClassAttendance);
+      }
+    } catch (e) {
+      console.error('Refresh error:', e);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
     }
   };
 
@@ -214,10 +236,16 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <Download className="w-3.5 h-3.5 text-emerald-100 group-hover:-translate-y-0.5 transition-transform" />
               <span>Download Attendance Slip</span>
             </button>
-            <div className="flex items-center space-x-1.5 text-[11px] text-slate-300 bg-slate-900/90 px-3 py-2 rounded-xl border border-slate-700/70 shadow-sm">
-              <Clock className="w-3.5 h-3.5 text-sky-400" />
-              <span>Updated: {formattedDate}</span>
-            </div>
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="flex items-center space-x-1.5 text-[11px] text-slate-300 hover:text-white bg-slate-900/90 hover:bg-slate-800 px-3 py-2 rounded-xl border border-slate-700/70 shadow-sm transition active:scale-95 cursor-pointer disabled:opacity-75"
+              title="Click to check for latest attendance updates from college"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-sky-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>{isRefreshing ? 'Syncing...' : `Updated: ${formattedDate}`}</span>
+            </button>
           </div>
         </div>
       </div>
