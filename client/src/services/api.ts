@@ -26,12 +26,15 @@ export const isNativeApp = (): boolean => {
   return false;
 };
 
+// Purge any legacy manual IP configuration from localStorage to ensure clients never hit internal IPs
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('college_custom_api_url');
+    localStorage.removeItem('custom_api_url');
+  } catch (e) {}
+}
+
 export const getApiBase = (): string => {
-  const custom = localStorage.getItem('college_custom_api_url') || localStorage.getItem('custom_api_url');
-  if (custom && custom.trim()) {
-    const trimmed = custom.trim().replace(/\/+$/, '');
-    return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
-  }
   // Native Android APK connects directly to production cloud HTTPS API
   if (isNativeApp()) {
     return `${PRODUCTION_SERVER_URL}/api`;
@@ -47,10 +50,6 @@ export const getApiBase = (): string => {
 };
 
 export const getApiRoot = (): string => {
-  const custom = localStorage.getItem('college_custom_api_url') || localStorage.getItem('custom_api_url');
-  if (custom && custom.trim()) {
-    return custom.trim().replace(/\/+$/, '').replace(/\/api$/, '');
-  }
   if (isNativeApp()) {
     return PRODUCTION_SERVER_URL;
   }
@@ -213,198 +212,24 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       throw networkError;
     }
 
-    // Dynamic offline cache check
-    const cacheKey = endpoint.replace(/^\/+/, '').replace(/[^a-zA-Z0-9_]/g, '_');
-    const cachedData = getFromOfflineCache<T>(cacheKey);
-    if (cachedData) {
-      return cachedData;
-    }
-
-    // Fallback handlers for network failure:
-    // A) Student Login Fallback
-    if (endpoint === '/auth/student/login' && options.body) {
-      const parsed = JSON.parse(options.body as string);
-      const inputCuId = (parsed.cu_id || '').toUpperCase().trim();
-      const inputPass = (parsed.password || '').trim();
-      const studentRecord = findBundledStudent(inputCuId);
-
-      if (!studentRecord) {
-        throw new Error(`Student record for "${inputCuId}" was not found in college records. Please verify your Student ID / CU ID.`);
-      }
-
-      const cleanCuId = studentRecord.profile.cu_id;
-      const changedPass = localStorage.getItem(`changed_pass_${cleanCuId}`);
-      let isPassValid = false;
-
-      if (changedPass) {
-        isPassValid = inputPass === changedPass;
-      } else {
-        isPassValid =
-          inputPass.toUpperCase() === cleanCuId.toUpperCase() ||
-          inputPass.toUpperCase() === cleanCuId.toUpperCase().replace(/^CU/i, '') ||
-          Boolean(studentRecord.profile.roll_number && inputPass.toUpperCase() === studentRecord.profile.roll_number.toUpperCase()) ||
-          Boolean(studentRecord.profile.roll_number && inputPass.toUpperCase() === studentRecord.profile.roll_number.toUpperCase().replace(/^CU/i, '')) ||
-          inputPass.toUpperCase() === inputCuId ||
-          inputPass.toUpperCase() === inputCuId.replace(/^CU/i, '');
-      }
-
-      if (!isPassValid) {
-        throw new Error(changedPass
-          ? 'Invalid password. Please enter the password you updated, or use "Want to change password?".'
-          : `Invalid password. Note: Your default password is your Student ID / CU ID (${cleanCuId}).`
-        );
-      }
-
-      const offlineToken = `college-token-${Date.now()}`;
-      localStorage.setItem('college_student_token', offlineToken);
-      localStorage.setItem('college_student_cuid', cleanCuId);
-      saveToOfflineCache(`students_${cleanCuId}`, { student: studentRecord.profile });
-      saveToOfflineCache(`students_${cleanCuId}_attendance`, studentRecord.attendance);
-      saveToOfflineCache(`students_${cleanCuId}_assignments`, studentRecord.assignments);
-
-      return {
-        success: true,
-        message: 'Signed in successfully (Offline College Master Database)',
-        token: offlineToken,
-        student: {
-          ...studentRecord.profile,
-          _isOfflineMode: true,
-        },
-        isOffline: true,
-      } as unknown as T;
-    }
-
-    // B) Student Attendance Fallback
-    if (endpoint.startsWith('/students/') && endpoint.endsWith('/attendance')) {
-      const match = endpoint.match(/\/students\/([^/]+)\/attendance/);
-      if (match) {
-        const cuId = decodeURIComponent(match[1]);
-        const studentRecord = findBundledStudent(cuId);
-        if (studentRecord && studentRecord.attendance) {
-          return studentRecord.attendance as unknown as T;
-        }
-      }
-    }
-
-    // C) Student Assignments Fallback
-    if (endpoint.startsWith('/students/') && endpoint.endsWith('/assignments')) {
-      const match = endpoint.match(/\/students\/([^/]+)\/assignments/);
-      if (match) {
-        const cuId = decodeURIComponent(match[1]);
-        const studentRecord = findBundledStudent(cuId);
-        if (studentRecord && studentRecord.assignments) {
-          return studentRecord.assignments as unknown as T;
-        }
-      }
-    }
-
-    // D) Student Profile Fallback
-    if (endpoint.startsWith('/students/')) {
-      const match = endpoint.match(/\/students\/([^/]+)$/);
-      if (match) {
-        const cuId = decodeURIComponent(match[1]);
-        const studentRecord = findBundledStudent(cuId);
-        if (studentRecord && studentRecord.profile) {
-          return { student: studentRecord.profile } as unknown as T;
-        }
-      }
-    }
-
-    // E) Change Password Fallback
-    if (endpoint === '/auth/student/change-password' && options.body) {
-      const parsed = JSON.parse(options.body as string);
-      const inputCuId = (parsed.cu_id || '').toUpperCase().trim();
-      const currentPass = (parsed.current_password || '').trim();
-      const newPass = (parsed.new_password || '').trim();
-      const studentRecord = findBundledStudent(inputCuId);
-
-      if (!studentRecord) {
-        throw new Error(`Student "${inputCuId}" not found in college records.`);
-      }
-
-      const cleanCuId = studentRecord.profile.cu_id;
-      const existingChanged = localStorage.getItem(`changed_pass_${cleanCuId}`);
-      const isCurrentValid = existingChanged
-        ? currentPass === existingChanged
-        : (currentPass.toUpperCase() === cleanCuId.toUpperCase() ||
-           (studentRecord.profile.roll_number && currentPass.toUpperCase() === studentRecord.profile.roll_number.toUpperCase()));
-
-      if (!isCurrentValid) {
-        throw new Error('Current password does not match. Default is your Student ID / CU ID.');
-      }
-
-      localStorage.setItem(`changed_pass_${cleanCuId}`, newPass);
-      return {
-        success: true,
-        message: 'Password changed successfully! You can now log in with your new password.',
-      } as unknown as T;
-    }
-
-    // F) Admin Login Fallback - Admin authentication requires live backend connection
-    if (endpoint === '/auth/admin/login') {
-      throw new Error('College server is unreachable. Admin authentication requires an active connection.');
-    }
-
-    // G) Admin Profile / Me Fallback
-    if (endpoint === '/auth/admin/me') {
-      const saved = localStorage.getItem('college_admin_user');
-      if (saved) {
-        return { user: JSON.parse(saved) } as unknown as T;
-      }
-      throw new Error('Not authenticated');
-    }
-
-    // H) Admin Analytics Fallback
-    if (endpoint === '/admin/analytics') {
-      const studentsList = Object.values(bundledData.students || {}).map((s: any) => s.profile);
-      const totalStudents = studentsList.length;
-      const eligibleStudents = studentsList.filter((s: any) => (s.overall_percentage || 0) >= 75).length;
-      const criticalStudents = studentsList.filter((s: any) => (s.overall_percentage || 0) < 60).length;
-      const avgAttendance = totalStudents > 0
-        ? Math.round((studentsList.reduce((acc: number, s: any) => acc + (s.overall_percentage || 0), 0) / totalStudents) * 10) / 10
-        : 0;
-      return {
-        totalStudents,
-        eligibleStudents,
-        criticalStudents,
-        averageAttendance: avgAttendance,
-        overallPercentage: avgAttendance,
-        totalSubjects: 8,
-        totalAttendanceRecords: totalStudents * 8,
-        pendingAssignments: 0,
-        recentImports: [],
-      } as unknown as T;
-    }
-
-    // I) Admin Students List Fallback
-    if (endpoint.startsWith('/admin/students')) {
-      const studentsList = Object.values(bundledData.students || {}).map((s: any) => s.profile);
-      return {
-        students: studentsList,
-        total: studentsList.length,
-        page: 1,
-        limit: 100,
-        totalPages: Math.ceil(studentsList.length / 100),
-        filterOptions: { branches: ['B.Tech'], semesters: ['1'] },
-      } as unknown as T;
-    }
-
-    // Format helpful error
+    // Honest connection error - do not silently present bundled or stale data as live attendance
     if (networkError.name === 'AbortError') {
       if (isHeavyOp) {
-        throw new Error('The operation is taking longer than expected. Please wait a moment and refresh to view updated data.');
+        throw new Error('The operation is taking longer than expected. Please wait a moment and refresh.');
       }
-      throw new Error('Request timed out. Please check your network connection and server status.');
+      throw new Error('Connection timed out. College server took too long to respond.');
     }
 
-    if (networkError.message && (networkError.message.includes('fetch') || networkError.message.includes('network') || networkError.message.includes('Failed'))) {
-      if (endpoint.includes('admin')) {
-        throw new Error(`Unable to connect to backend server at ${base}. Please verify that the server is running.`);
-      }
-      throw new Error('Unable to connect to college server. Please verify your Student ID / CU ID or network connection.');
+    if (networkError.message && (
+      networkError.message.includes('fetch') ||
+      networkError.message.includes('network') ||
+      networkError.message.includes('Failed') ||
+      networkError.message.includes('NetworkError')
+    )) {
+      throw new Error('College server is currently unreachable. Please check your internet connection.');
     }
 
-    throw networkError;
+    throw new Error(networkError.message || 'College server is currently unreachable. Please check your connection.');
   }
 }
 
@@ -775,17 +600,8 @@ export const api = {
       return { messages: cached || [] };
     }),
 
-  setCustomApiUrl: (url: string) => {
-    if (!url || !url.trim()) {
-      localStorage.removeItem('college_custom_api_url');
-      localStorage.removeItem('custom_api_url');
-    } else {
-      const clean = url.trim().replace(/\/+$/, '');
-      localStorage.setItem('college_custom_api_url', clean);
-      localStorage.setItem('custom_api_url', clean);
-    }
-  },
-  getCustomApiUrl: () => localStorage.getItem('college_custom_api_url') || localStorage.getItem('custom_api_url') || '',
+  setCustomApiUrl: (_url: string) => {},
+  getCustomApiUrl: () => '',
   checkServerHealth,
 
   downloadTemplateUrl: `${getApiBase()}/admin/excel/template`,

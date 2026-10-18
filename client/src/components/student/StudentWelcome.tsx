@@ -402,14 +402,14 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
                     ? 'bg-amber-400 animate-pulse'
                     : serverStatus.online
                     ? 'bg-emerald-400 live-indicator'
-                    : 'bg-amber-500'
+                    : 'bg-rose-500'
                 }`} />
                 <span className="text-slate-300 font-medium text-[11px] truncate">
                   {serverStatus.checking
                     ? 'Checking college server...'
                     : serverStatus.online
                     ? `Live Server: Connected (${serverStatus.latencyMs}ms)`
-                    : 'Offline Mode • Bundled Database'}
+                    : 'College Server Offline • Reconnecting...'}
                 </span>
               </div>
               <button

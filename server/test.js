@@ -41,8 +41,8 @@ async function runTests() {
     if (data.status !== 'online') throw new Error('Status is not online');
   });
 
-  const testAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@college.edu';
-  const testAdminPassword = process.env.SUPER_ADMIN_PASSWORD || 'Admin@123';
+  const testAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'Dean@coer.edu';
+  const testAdminPassword = process.env.SUPER_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || 'Dean@1111';
 
   // 2. Admin Authentication
   await test('Admin login returns JWT token', async () => {
