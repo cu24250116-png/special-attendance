@@ -80,6 +80,13 @@ function computeSpecialClassAttendance(cuId, allRecords = [], assignments = []) 
 async function exportBundledData() {
   await db.init();
   const students = await db.all('SELECT * FROM students');
+  const outDir = path.join(__dirname, '..', 'client', 'src', 'data');
+  const outFile = path.join(outDir, 'bundledAttendanceData.json');
+
+  if (students.length === 0 && fs.existsSync(outFile)) {
+    console.log('Preserving existing bundled JSON file (0 students in active DB, offline dataset preserved).');
+    return;
+  }
   const allAttendance = await db.all('SELECT * FROM attendance_records');
   const allAssignments = await db.all('SELECT * FROM assignments');
 
@@ -200,12 +207,10 @@ async function exportBundledData() {
     };
   }
 
-  const outDir = path.join(__dirname, '..', 'client', 'src', 'data');
   if (!fs.existsSync(outDir)) {
     fs.mkdirSync(outDir, { recursive: true });
   }
 
-  const outFile = path.join(outDir, 'bundledAttendanceData.json');
   fs.writeFileSync(outFile, JSON.stringify(bundle));
   const fileSizeMb = (fs.statSync(outFile).size / (1024 * 1024)).toFixed(2);
   console.log(`Successfully exported bundled offline database for ${students.length} students to ${outFile} (${fileSizeMb} MB)`);
