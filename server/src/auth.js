@@ -101,10 +101,15 @@ export function requireStudentOrAdmin(req, res, next) {
 
   // If student, can only view their own records
   if (decoded.role === 'student') {
-    if (targetCuId && decoded.cu_id.toUpperCase().trim() !== targetCuId) {
-      return res.status(403).json({
-        error: 'Access denied: You are not authorized to view records of another student.',
-      });
+    if (targetCuId) {
+      const decodedUpper = (decoded.cu_id || '').toUpperCase().trim();
+      const decodedClean = decodedUpper.replace(/^CU[-_ ]*/i, '');
+      const targetClean = targetCuId.replace(/^CU[-_ ]*/i, '');
+      if (decodedUpper !== targetCuId && decodedClean !== targetClean) {
+        return res.status(403).json({
+          error: 'Access denied: You are not authorized to view records of another student.',
+        });
+      }
     }
     req.user = decoded;
     return next();

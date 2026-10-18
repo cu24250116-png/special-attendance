@@ -138,13 +138,22 @@ async function runTests() {
   });
 
   // 9. Student Attendance shows special class dates from Excel
-  await test('Student dashboard returns attendance for imported special class dates', async () => {
+  await test('Student dashboard returns attendance for imported special class dates and 100/N formula', async () => {
     const res = await fetch(`${API_BASE}/students/${testStudentCuId}/attendance`, {
       headers: { Authorization: `Bearer ${studentToken}` },
     });
     if (!res.ok) throw new Error(`Fetch attendance failed: ${res.status}`);
     const data = await res.json();
     if (!data.dailySummaries || data.dailySummaries.length === 0) throw new Error('Expected daily summaries');
+    if (!data.specialClassAttendance) throw new Error('Missing specialClassAttendance object');
+    if (data.specialClassAttendance.totalSpecialDates !== 8) {
+      throw new Error(`Expected 8 special dates, got ${data.specialClassAttendance.totalSpecialDates}`);
+    }
+    if (data.specialClassAttendance.weightPerDay !== 12.5) {
+      throw new Error(`Expected 12.5% weight per day, got ${data.specialClassAttendance.weightPerDay}`);
+    }
+    const hasUploadField = data.dailySummaries.some(d => d.assignmentsUploaded !== undefined);
+    if (!hasUploadField) throw new Error('Expected assignmentsUploaded field in daily summaries');
   });
 
   // 10. Unauthorized Cross-Student Access Prevention

@@ -12,7 +12,8 @@ import {
   Clock,
   ArrowUpRight,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Megaphone
 } from 'lucide-react';
 
 interface AdminOverviewProps {
@@ -87,6 +88,16 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({ onNavigateTab }) =
             title="Refresh statistics"
           >
             <RefreshCw className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab('messages')}
+            className="px-3.5 py-2.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 text-xs font-semibold flex items-center space-x-1.5 transition"
+            title="Broadcast notice to students"
+          >
+            <Megaphone className="w-4 h-4 text-purple-400" />
+            <span>Send Notice</span>
           </button>
 
           <button

@@ -21,6 +21,23 @@ export const AdminSettings: React.FC = () => {
     fetchHealth();
   }, []);
 
+  const [customUrl, setCustomUrl] = useState(() => localStorage.getItem('custom_api_url') || '');
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const handleSaveUrl = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (customUrl.trim()) {
+      localStorage.setItem('custom_api_url', customUrl.trim());
+    } else {
+      localStorage.removeItem('custom_api_url');
+    }
+    setSaveSuccess(true);
+    setTimeout(() => {
+      setSaveSuccess(false);
+      window.location.reload();
+    }, 1200);
+  };
+
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
       {/* Header */}
@@ -43,6 +60,42 @@ export const AdminSettings: React.FC = () => {
         >
           <RefreshCw className="w-4 h-4" />
         </button>
+      </div>
+
+      {/* Cloud & Background Persistence Card */}
+      <div className="glass-panel rounded-2xl p-6 border border-indigo-800/50 bg-gradient-to-r from-slate-900 via-indigo-950/20 to-slate-900 space-y-4">
+        <div className="flex items-center space-x-2.5 text-indigo-400">
+          <Server className="w-5 h-5" />
+          <h3 className="text-sm font-bold uppercase tracking-wider font-mono">
+            24/7 Background Persistence &amp; Server Configuration
+          </h3>
+        </div>
+        <p className="text-xs text-slate-300 leading-relaxed">
+          Students can fetch and view their records continuously even when Admin is logged out or when VS Code is closed.
+          Data is persistently written to SQLite disk storage and cached on mobile clients.
+        </p>
+
+        <form onSubmit={handleSaveUrl} className="pt-2 flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            value={customUrl}
+            onChange={(e) => setCustomUrl(e.target.value)}
+            placeholder="Custom Backend API URL (e.g., https://my-server.onrender.com or http://192.168.1.13:5000)"
+            className="flex-1 px-4 py-2.5 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-indigo-500"
+          />
+          <button
+            type="submit"
+            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-900/30 transition flex items-center justify-center space-x-1.5"
+          >
+            <span>Save &amp; Switch API</span>
+          </button>
+        </form>
+
+        {saveSuccess && (
+          <p className="text-xs text-emerald-400 font-semibold animate-fadeIn">
+            ✓ Backend URL updated! Reloading application...
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

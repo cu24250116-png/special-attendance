@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { UserCheck, Lock, Eye, EyeOff, ArrowRight, School, AlertCircle, Info } from 'lucide-react';
-import { api } from '../../services/api';
+import React, { useState, useEffect } from 'react';
+import { UserCheck, Lock, Eye, EyeOff, ArrowRight, School, AlertCircle, Info, Smartphone, Key, CheckCircle2, ArrowLeft, Server, Wifi, RefreshCw, X } from 'lucide-react';
+import { api, isNativeApp } from '../../services/api';
 
 interface StudentWelcomeProps {
   onLoginSuccess: (cuId: string, token: string) => void;
@@ -12,6 +12,49 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Server Connection & Setup State
+  const [serverStatus, setServerStatus] = useState<{
+    online: boolean;
+    checking: boolean;
+    latencyMs?: number;
+    message?: string;
+  }>({
+    online: false,
+    checking: true,
+  });
+  const [showServerModal, setShowServerModal] = useState(false);
+  const [serverUrlInput, setServerUrlInput] = useState(() => api.getCustomApiUrl() || (isNativeApp() ? 'http://10.111.193.91:5000' : ''));
+  const [testResult, setTestResult] = useState<{ testing: boolean; success?: boolean; message?: string } | null>(null);
+
+  // Change Password state
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [changeCuId, setChangeCuId] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [changeLoading, setChangeLoading] = useState(false);
+  const [changeError, setChangeError] = useState<string | null>(null);
+
+  const isNative = isNativeApp();
+
+  const checkConnection = async (targetUrl?: string) => {
+    setServerStatus(prev => ({ ...prev, checking: true }));
+    const health = await api.checkServerHealth(targetUrl);
+    setServerStatus({
+      online: health.online,
+      checking: false,
+      latencyMs: health.latencyMs,
+      message: health.message,
+    });
+    return health;
+  };
+
+  useEffect(() => {
+    checkConnection();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,7 +62,7 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
     const targetPassword = password.trim();
 
     if (!targetId) {
-      setError('Please enter your Student ID / CU ID.');
+      setError('Please enter your Student ID / CU ID or Roll Number.');
       return;
     }
     if (!targetPassword) {
@@ -28,6 +71,7 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
     }
 
     setError(null);
+    setSuccessMessage(null);
     setLoading(true);
     try {
       const data = await api.studentLogin(targetId, targetPassword);
@@ -41,13 +85,58 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
     }
   };
 
-  // Quick helper to fill password when CU ID changes if password is empty
   const handleCuIdChange = (val: string) => {
     const uppercaseVal = val.toUpperCase();
     setCuId(uppercaseVal);
-    // If password hasn't been manually set or matches old CU ID, keep it in sync
     if (!password || password === cuId) {
       setPassword(uppercaseVal);
+    }
+  };
+
+
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetId = changeCuId.trim().toUpperCase();
+    const currentPass = currentPassword.trim();
+    const newPass = newPassword.trim();
+    const confirmPass = confirmPassword.trim();
+
+    if (!targetId) {
+      setChangeError('Please enter your Student ID / CU ID.');
+      return;
+    }
+    if (!currentPass) {
+      setChangeError('Please enter your current password (default is CU ID).');
+      return;
+    }
+    if (!newPass) {
+      setChangeError('Please enter your new password.');
+      return;
+    }
+    if (newPass.length < 4) {
+      setChangeError('New password must be at least 4 characters long.');
+      return;
+    }
+    if (newPass !== confirmPass) {
+      setChangeError('New password and confirm password do not match.');
+      return;
+    }
+
+    setChangeError(null);
+    setChangeLoading(true);
+    try {
+      const res = await api.changeStudentPassword(targetId, currentPass, newPass);
+      setSuccessMessage(res.message || 'Password updated successfully!');
+      setCuId(targetId);
+      setPassword(newPass);
+      setShowChangePassword(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      setChangeError(err.message || 'Failed to update password. Please check your current password.');
+    } finally {
+      setChangeLoading(false);
     }
   };
 
@@ -77,94 +166,417 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
             </p>
           </div>
 
-          {error && (
+          {successMessage && (
+            <div className="mb-6 p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-200 text-xs flex items-start space-x-2.5 animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+              <span>{successMessage}</span>
+            </div>
+          )}
+
+          {error && !showChangePassword && (
             <div className="mb-6 p-3.5 rounded-xl bg-red-950/60 border border-red-800/60 text-red-200 text-xs flex items-start space-x-2.5 animate-fadeIn">
               <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label htmlFor="student_id_input" className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-                Student ID / CU ID / Roll Number
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                  <UserCheck className="w-5 h-5 text-slate-400" />
-                </div>
-                <input
-                  id="student_id_input"
-                  type="text"
-                  value={cuId}
-                  onChange={(e) => handleCuIdChange(e.target.value)}
-                  placeholder="Enter Student ID / CU ID"
-                  className="w-full pl-11 pr-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono tracking-wider text-sm transition"
-                  autoFocus
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label htmlFor="student_password_input" className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
-                  Password
-                </label>
-                <span className="text-[11px] text-sky-400 font-medium">
-                  Default: Same as Student ID
-                </span>
-              </div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                  <Lock className="w-5 h-5 text-slate-400" />
-                </div>
-                <input
-                  id="student_password_input"
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter Password (CU ID)"
-                  className="w-full pl-11 pr-11 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono tracking-wider text-sm transition"
-                  required
-                />
+          {showChangePassword ? (
+            /* ========================================= */
+            /* CHANGE PASSWORD FORM                      */
+            /* ========================================= */
+            <form onSubmit={handleChangePasswordSubmit} className="space-y-4 animate-fadeIn">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-white"
-                  tabIndex={-1}
+                  onClick={() => setShowChangePassword(false)}
+                  className="text-xs text-slate-400 hover:text-white flex items-center space-x-1 transition"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Back to Login</span>
+                </button>
+                <span className="text-xs font-semibold text-sky-400 font-mono">Set New Password</span>
+              </div>
+
+              {changeError && (
+                <div className="p-3 rounded-xl bg-red-950/60 border border-red-800/60 text-red-200 text-xs flex items-start space-x-2 animate-fadeIn">
+                  <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <span>{changeError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Student ID / CU ID
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                    <UserCheck className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <input
+                    type="text"
+                    value={changeCuId}
+                    onChange={(e) => setChangeCuId(e.target.value.toUpperCase())}
+                    placeholder="Enter Student ID / CU ID"
+                    className="w-full pl-11 pr-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 uppercase font-mono tracking-wider text-sm transition"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
+                    Current Password
+                  </label>
+                  <span className="text-[10px] text-slate-400">Default is your CU ID</span>
+                </div>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                    <Lock className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <input
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Enter Current Password"
+                    className="w-full pl-11 pr-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono tracking-wider text-sm transition"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                  New Password (min 4 chars)
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                    <Key className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Create New Password"
+                    className="w-full pl-11 pr-11 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono tracking-wider text-sm transition"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-white"
+                  >
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Confirm New Password
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                    <Key className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter New Password"
+                    className="w-full pl-11 pr-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono tracking-wider text-sm transition"
+                    required
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={changeLoading || !changeCuId.trim() || !currentPassword.trim() || !newPassword.trim()}
+                className="w-full py-3.5 px-4 bg-gradient-to-r from-sky-600 via-indigo-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-medium rounded-xl shadow-lg shadow-sky-900/30 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed transition transform active:scale-[0.99] mt-3"
+              >
+                <span>{changeLoading ? 'Saving Password...' : 'Save & Update Password'}</span>
+                <CheckCircle2 className="w-4 h-4" />
+              </button>
+            </form>
+          ) : (
+            /* ========================================= */
+            /* STANDARD STUDENT LOGIN FORM               */
+            /* ========================================= */
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label htmlFor="student_id_input" className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Student ID / CU ID / Roll Number
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                    <UserCheck className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <input
+                    id="student_id_input"
+                    type="text"
+                    value={cuId}
+                    onChange={(e) => handleCuIdChange(e.target.value)}
+                    placeholder="Enter Student ID / CU ID"
+                    className="w-full pl-11 pr-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase font-mono tracking-wider text-sm transition"
+                    autoFocus
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label htmlFor="student_password_input" className="block text-xs font-semibold uppercase tracking-wider text-slate-300">
+                    Password
+                  </label>
+                  <span className="text-[11px] text-sky-400 font-medium">
+                    Default: Same as Student ID
+                  </span>
+                </div>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                    <Lock className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <input
+                    id="student_password_input"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter Password (CU ID)"
+                    className="w-full pl-11 pr-11 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono tracking-wider text-sm transition"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-white"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Want to change password option */}
+              <div className="flex items-center justify-between pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChangeCuId(cuId);
+                    setChangeError(null);
+                    setShowChangePassword(true);
+                  }}
+                  className="text-xs text-sky-400 hover:text-sky-300 font-medium flex items-center space-x-1.5 transition group"
+                >
+                  <Key className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" />
+                  <span className="underline underline-offset-4 decoration-sky-500/50">
+                    Want to change password?
+                  </span>
                 </button>
               </div>
+
+              {/* Note box */}
+              <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-800/40 text-blue-200 text-xs flex items-start space-x-2">
+                <Info className="w-4 h-4 text-sky-400 flex-shrink-0 mt-0.5" />
+                <p>
+                  As configured by the college, your default password is your <strong>Student ID / CU ID</strong> from the official imported Excel sheet.
+                </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || !cuId.trim() || !password.trim()}
+                className="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-600 hover:from-blue-500 hover:to-sky-500 text-white font-medium rounded-xl shadow-lg shadow-blue-900/30 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed transition transform active:scale-[0.99] mt-2"
+              >
+                <span>{loading ? 'Authenticating Student...' : 'Sign In to Dashboard'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+          )}
+
+          {/* Android Mobile App APK Status / Download Banner */}
+          <div className="mt-5 pt-4 border-t border-slate-800/80 space-y-2.5">
+            {/* Live Server Connection Status Pill */}
+            <div className="w-full py-2.5 px-3.5 bg-slate-900/90 border border-slate-800 rounded-xl text-xs flex items-center justify-between shadow-sm">
+              <div className="flex items-center space-x-2 min-w-0">
+                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                  serverStatus.checking
+                    ? 'bg-amber-400 animate-pulse'
+                    : serverStatus.online
+                    ? 'bg-emerald-400 live-indicator'
+                    : 'bg-amber-500'
+                }`} />
+                <span className="text-slate-300 font-medium text-[11px] truncate">
+                  {serverStatus.checking
+                    ? 'Checking college server...'
+                    : serverStatus.online
+                    ? `Live Server: Online (${serverStatus.latencyMs}ms)`
+                    : 'Offline Mode • Bundled Database'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setTestResult(null);
+                  setShowServerModal(true);
+                }}
+                className="ml-2 px-2.5 py-1 text-[11px] rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 font-semibold transition flex items-center space-x-1 flex-shrink-0"
+              >
+                <Server className="w-3 h-3" />
+                <span>Configure</span>
+              </button>
             </div>
 
-            {/* Note box */}
-            <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-800/40 text-blue-200 text-xs flex items-start space-x-2">
-              <Info className="w-4 h-4 text-sky-400 flex-shrink-0 mt-0.5" />
-              <p>
-                As configured by the college, your default password is your <strong>Student ID / CU ID</strong> from the official imported Excel sheet.
-              </p>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading || !cuId.trim() || !password.trim()}
-              className="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-600 hover:from-blue-500 hover:to-sky-500 text-white font-medium rounded-xl shadow-lg shadow-blue-900/30 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed transition transform active:scale-[0.99] mt-2"
-            >
-              <span>{loading ? 'Authenticating Student...' : 'Sign In to Dashboard'}</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </form>
+            {!isNative && (
+              <>
+                <a
+                  href={api.downloadApkUrl}
+                  download="SpecialAttendance.apk"
+                  className="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold flex items-center justify-center space-x-2 transition shadow-lg shadow-emerald-900/40 group active:scale-[0.99]"
+                >
+                  <Smartphone className="w-4 h-4 text-emerald-200 group-hover:scale-110 transition-transform" />
+                  <span>Download Updated Android App (.APK)</span>
+                </a>
+                <p className="text-[10px] text-slate-400 text-center">
+                  Direct install on any Android phone • Auto-syncs with college admin
+                </p>
+              </>
+            )}
+          </div>
 
           {/* Footer note */}
-          <div className="mt-8 pt-4 border-t border-slate-800/80 text-center">
+          <div className="mt-4 pt-3 border-t border-slate-800/50 text-center">
             <p className="text-[11px] text-slate-500">
               Only records officially uploaded by the College Administrator via Excel will be available.
             </p>
           </div>
         </div>
       </div>
+
+      {/* ========================================= */}
+      {/* SERVER SETUP & CONNECTION MODAL          */}
+      {/* ========================================= */}
+      {showServerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="glass-panel max-w-md w-full rounded-2xl p-6 border border-slate-700 shadow-2xl relative space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2">
+                <div className="p-1.5 rounded-lg bg-sky-950/80 border border-sky-800/60 text-sky-400">
+                  <Server className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">College Server Connection</h3>
+                  <p className="text-[10px] text-slate-400">Configure connection to fetch live admin dataset</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowServerModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Backend Server URL
+                </label>
+                <input
+                  type="text"
+                  value={serverUrlInput}
+                  onChange={(e) => setServerUrlInput(e.target.value)}
+                  placeholder="e.g. http://10.111.193.91:5000"
+                  className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-mono placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+
+              {/* Quick Presets */}
+              <div className="space-y-1">
+                <span className="text-[10px] uppercase font-semibold text-slate-400">Quick Presets:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setServerUrlInput('http://10.111.193.91:5000')}
+                    className="px-2.5 py-1 text-[11px] rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 font-mono transition"
+                  >
+                    Wi-Fi: 10.111.193.91:5000
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setServerUrlInput('http://localhost:5000')}
+                    className="px-2.5 py-1 text-[11px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-mono transition"
+                  >
+                    Localhost (5000)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setServerUrlInput('')}
+                    className="px-2 py-1 text-[11px] rounded-lg bg-slate-800/60 hover:bg-slate-800 text-slate-400 transition"
+                  >
+                    Clear (Default)
+                  </button>
+                </div>
+              </div>
+
+              {/* Test Result Message */}
+              {testResult && (
+                <div className={`p-3 rounded-xl text-xs flex items-center space-x-2 animate-fadeIn ${
+                  testResult.success
+                    ? 'bg-emerald-950/60 border border-emerald-800/60 text-emerald-300'
+                    : 'bg-red-950/60 border border-red-800/60 text-red-300'
+                }`}>
+                  {testResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                  )}
+                  <span>{testResult.message}</span>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center space-x-2 pt-2">
+                <button
+                  type="button"
+                  disabled={testResult?.testing}
+                  onClick={async () => {
+                    setTestResult({ testing: true, message: 'Testing server connection...' });
+                    const res = await checkConnection(serverUrlInput.trim());
+                    setTestResult({
+                      testing: false,
+                      success: res.online,
+                      message: res.online
+                        ? `Connected successfully! Latency: ${res.latencyMs}ms`
+                        : (res.message || 'Server unreachable. Verify Wi-Fi or IP address.'),
+                    });
+                  }}
+                  className="flex-1 py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition flex items-center justify-center space-x-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${testResult?.testing ? 'animate-spin' : ''}`} />
+                  <span>{testResult?.testing ? 'Testing...' : 'Test Connection'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    api.setCustomApiUrl(serverUrlInput.trim());
+                    checkConnection(serverUrlInput.trim());
+                    setShowServerModal(false);
+                    setError(null);
+                  }}
+                  className="flex-1 py-2.5 px-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white text-xs font-semibold shadow-md transition flex items-center justify-center space-x-1"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Save &amp; Apply</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

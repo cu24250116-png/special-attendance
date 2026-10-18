@@ -18,28 +18,28 @@ export async function seedDatabase() {
   await db.init();
   const now = new Date().toISOString();
 
-  // 1. Create or maintain Default Admin account
-  const adminEmail = process.env.ADMIN_DEFAULT_EMAIL || 'admin@college.edu';
-  const adminPassword = process.env.ADMIN_DEFAULT_PASSWORD || 'Admin@123';
-  const existingAdmin = await db.get('SELECT * FROM users WHERE email = ?', [adminEmail]);
+  // 1. Create or maintain Dean Admin account (Dean@coer.edu / Dean@1111)
+  const adminEmail = process.env.ADMIN_DEFAULT_EMAIL || 'Dean@coer.edu';
+  const adminPassword = process.env.ADMIN_DEFAULT_PASSWORD || 'Dean@1111';
+  const passwordHash = hashPassword(adminPassword);
 
-  if (!existingAdmin) {
-    const passwordHash = hashPassword(adminPassword);
+  const existingDean = await db.get('SELECT * FROM users WHERE LOWER(email) = LOWER(?)', [adminEmail]);
+  if (!existingDean) {
     await db.run(`
       INSERT INTO users (id, username, email, password_hash, role, created_at)
       VALUES (?, ?, ?, ?, 'admin', ?)
-    `, [uuidv4(), 'College Admin', adminEmail, passwordHash, now]);
-    console.log(`Initialized default admin user: ${adminEmail} (password: ${adminPassword})`);
+    `, [uuidv4(), 'Dean Academic', adminEmail, passwordHash, now]);
+    console.log(`Initialized primary admin user: ${adminEmail} (password: ${adminPassword})`);
+  } else {
+    await db.run('UPDATE users SET password_hash = ? WHERE LOWER(email) = LOWER(?)', [passwordHash, adminEmail]);
+    console.log(`Verified and updated admin password for: ${adminEmail}`);
   }
 
-  // 2. PURGE ALL DUMMY DATA per user requirement
-  // Database will only contain real data imported from admin Excel sheets.
-  await db.run('DELETE FROM students');
-  await db.run('DELETE FROM attendance_records');
-  await db.run('DELETE FROM assignments');
-  await db.run('DELETE FROM import_jobs');
-  await db.run('DELETE FROM import_errors');
-  console.log('Cleaned database: All dummy students and dummy attendance records removed.');
+  // Remove any legacy admin placeholder
+  await db.run('DELETE FROM users WHERE LOWER(email) = ?', ['admin@college.edu']);
+
+  // Preserve real imported data: we do NOT wipe students or attendance records on server restart!
+  console.log('Database verification: Preserving all imported student and attendance records.');
 
   // 3. Generate Official Excel Template matching user requirements
   const sampleMasterFile = path.join(SAMPLES_DIR, 'College_Master_Import.xlsx');

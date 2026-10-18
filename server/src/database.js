@@ -23,6 +23,19 @@ class DatabaseService {
     this.pgPool = null;
     this.sqliteDb = null;
     this.isInitialized = false;
+    this.batchMode = false;
+    this.hasPendingSave = false;
+  }
+
+  startBatch() {
+    this.batchMode = true;
+  }
+
+  endBatch() {
+    this.batchMode = false;
+    if (this.hasPendingSave) {
+      this.saveSqlite();
+    }
   }
 
   async init() {
@@ -54,10 +67,15 @@ class DatabaseService {
 
   saveSqlite() {
     if (!this.sqliteDb || this.isPg) return;
+    if (this.batchMode) {
+      this.hasPendingSave = true;
+      return;
+    }
     try {
       const data = this.sqliteDb.export();
       const buffer = Buffer.from(data);
       fs.writeFileSync(SQLITE_FILE, buffer);
+      this.hasPendingSave = false;
     } catch (err) {
       console.error('Error saving SQLite database to disk:', err);
     }
@@ -86,10 +104,12 @@ class DatabaseService {
         email TEXT,
         phone TEXT,
         password_hash TEXT,
+        password_changed INTEGER DEFAULT 0,
         overall_percentage REAL DEFAULT 0,
         total_sessions INTEGER DEFAULT 0,
         present_sessions INTEGER DEFAULT 0,
         absent_sessions INTEGER DEFAULT 0,
+        import_job_id TEXT,
         last_updated TEXT NOT NULL
       );
 
@@ -101,6 +121,8 @@ class DatabaseService {
         total_sessions INTEGER NOT NULL DEFAULT 1,
         present_sessions INTEGER NOT NULL DEFAULT 1,
         absent_sessions INTEGER NOT NULL DEFAULT 0,
+        assignments_uploaded INTEGER DEFAULT 0,
+        import_job_id TEXT,
         attendance_percentage REAL NOT NULL DEFAULT 100,
         status TEXT NOT NULL DEFAULT 'Present',
         created_at TEXT NOT NULL,
@@ -117,6 +139,7 @@ class DatabaseService {
         submission_status TEXT NOT NULL DEFAULT 'Pending',
         submission_date TEXT,
         remarks TEXT,
+        import_job_id TEXT,
         created_at TEXT NOT NULL,
         FOREIGN KEY (cu_id) REFERENCES students(cu_id) ON DELETE CASCADE
       );
@@ -168,12 +191,45 @@ class DatabaseService {
         is_enabled INTEGER DEFAULT 1
       );
 
+      CREATE TABLE IF NOT EXISTS admin_messages (
+        id TEXT PRIMARY KEY,
+        sender_title TEXT NOT NULL DEFAULT 'Admin',
+        message TEXT NOT NULL,
+        target_type TEXT NOT NULL DEFAULT 'all',
+        target_value TEXT,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        created_at TEXT NOT NULL,
+        created_by TEXT
+      );
+
       CREATE INDEX IF NOT EXISTS idx_attendance_cu_id ON attendance_records(cu_id);
       CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance_records(attendance_date);
       CREATE INDEX IF NOT EXISTS idx_assignments_cu_id ON assignments(cu_id);
       CREATE INDEX IF NOT EXISTS idx_students_branch ON students(branch);
       CREATE INDEX IF NOT EXISTS idx_import_errors_job ON import_errors(job_id);
+      CREATE INDEX IF NOT EXISTS idx_admin_messages_target ON admin_messages(target_type, target_value);
     `);
+
+    // Ensure columns exist on already-created SQLite tables
+    try { this.sqliteDb.run('ALTER TABLE attendance_records ADD COLUMN assignments_uploaded INTEGER DEFAULT 0'); } catch(e) {}
+    try { this.sqliteDb.run('ALTER TABLE attendance_records ADD COLUMN import_job_id TEXT'); } catch(e) {}
+    try { this.sqliteDb.run('ALTER TABLE assignments ADD COLUMN import_job_id TEXT'); } catch(e) {}
+    try { this.sqliteDb.run('ALTER TABLE students ADD COLUMN import_job_id TEXT'); } catch(e) {}
+    try { this.sqliteDb.run('ALTER TABLE students ADD COLUMN password_changed INTEGER DEFAULT 0'); } catch(e) {}
+    try {
+      this.sqliteDb.run(`
+        CREATE TABLE IF NOT EXISTS admin_messages (
+          id TEXT PRIMARY KEY,
+          sender_title TEXT NOT NULL DEFAULT 'Admin',
+          message TEXT NOT NULL,
+          target_type TEXT NOT NULL DEFAULT 'all',
+          target_value TEXT,
+          priority TEXT NOT NULL DEFAULT 'normal',
+          created_at TEXT NOT NULL,
+          created_by TEXT
+        )
+      `);
+    } catch(e) {}
   }
 
   async initPgTables() {
@@ -280,11 +336,23 @@ class DatabaseService {
           is_enabled INTEGER DEFAULT 1
         );
 
+        CREATE TABLE IF NOT EXISTS admin_messages (
+          id VARCHAR(64) PRIMARY KEY,
+          sender_title VARCHAR(100) NOT NULL DEFAULT 'Admin',
+          message TEXT NOT NULL,
+          target_type VARCHAR(50) NOT NULL DEFAULT 'all',
+          target_value VARCHAR(255),
+          priority VARCHAR(50) NOT NULL DEFAULT 'normal',
+          created_at TIMESTAMPTZ NOT NULL,
+          created_by VARCHAR(100)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_attendance_cu_id ON attendance_records(cu_id);
         CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance_records(attendance_date);
         CREATE INDEX IF NOT EXISTS idx_assignments_cu_id ON assignments(cu_id);
         CREATE INDEX IF NOT EXISTS idx_students_branch ON students(branch);
         CREATE INDEX IF NOT EXISTS idx_import_errors_job ON import_errors(job_id);
+        CREATE INDEX IF NOT EXISTS idx_admin_messages_target ON admin_messages(target_type, target_value);
       `);
     } finally {
       client.release();
@@ -356,13 +424,16 @@ class DatabaseService {
       }
     } else {
       try {
+        this.startBatch();
         this.sqliteDb.run('BEGIN TRANSACTION;');
         const res = await fn(this);
         this.sqliteDb.run('COMMIT;');
-        this.saveSqlite();
+        this.endBatch();
         return res;
       } catch (err) {
         this.sqliteDb.run('ROLLBACK;');
+        this.batchMode = false;
+        this.hasPendingSave = false;
         throw err;
       }
     }

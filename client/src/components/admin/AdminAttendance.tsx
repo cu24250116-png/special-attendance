@@ -103,8 +103,74 @@ export const AdminAttendance: React.FC = () => {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+      {/* Mobile Touch Cards View (< md) */}
+      <div className="md:hidden space-y-3">
+        {loading ? (
+          <div className="glass-panel rounded-2xl p-8 text-center text-slate-500 text-xs">
+            Loading records...
+          </div>
+        ) : records.length === 0 ? (
+          <div className="glass-panel rounded-2xl p-8 text-center text-slate-500 text-xs">
+            No attendance records match the selected filters.
+          </div>
+        ) : (
+          records.map((r) => (
+            <div key={r.id} className="glass-panel rounded-2xl p-4 border border-slate-800 space-y-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-semibold text-white">{r.student_name}</h4>
+                  <div className="flex items-center space-x-2 mt-0.5 text-[11px] font-mono">
+                    <span className="text-sky-400 font-bold">{r.cu_id}</span>
+                    <span className="text-slate-500">•</span>
+                    <span className="text-slate-400">{r.attendance_date}</span>
+                  </div>
+                </div>
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider flex-shrink-0 ${
+                    r.status === 'Present'
+                      ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/60'
+                      : r.status === 'Absent'
+                      ? 'bg-rose-950/60 text-rose-300 border border-rose-800/60'
+                      : 'bg-amber-950/60 text-amber-300 border border-amber-800/60'
+                  }`}
+                >
+                  {r.status}
+                </span>
+              </div>
+
+              <div className="text-xs text-slate-300 bg-slate-900/60 px-3 py-1.5 rounded-lg border border-slate-800/60">
+                <span className="text-slate-400 text-[10px] uppercase font-semibold">Subject: </span>
+                <span className="text-slate-200 font-medium">{r.subject}</span>
+              </div>
+
+              {/* Attendance metrics */}
+              <div className="grid grid-cols-3 gap-2 py-2 px-3 rounded-xl bg-slate-900/80 border border-slate-800/80 text-[11px] text-center font-mono">
+                <div>
+                  <div className="text-slate-400 text-[9px] uppercase">Sessions</div>
+                  <div className="text-white font-bold">{r.total_sessions}</div>
+                </div>
+                <div>
+                  <div className="text-slate-400 text-[9px] uppercase">P / A</div>
+                  <div className="font-bold">
+                    <span className="text-emerald-400">{r.present_sessions}</span>
+                    <span className="text-slate-500"> / </span>
+                    <span className="text-rose-400">{r.absent_sessions}</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-slate-400 text-[9px] uppercase">Percentage</div>
+                  <div className={`font-bold ${r.attendance_percentage >= 75 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {r.attendance_percentage}%
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop Table (hidden on mobile, visible md+) */}
+      <div className="hidden md:block glass-panel rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-900/90 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider">

@@ -15,6 +15,11 @@ export default defineConfig({
         target: 'http://localhost:5000',
         changeOrigin: true,
       },
+      '/download': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
     },
   },
 })
+

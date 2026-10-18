@@ -1,14 +1,41 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Student } from '../../types';
-import { User, Mail, Phone, BookOpen, ShieldAlert, Award, FileText, CheckCircle2 } from 'lucide-react';
+import { User, Mail, Phone, BookOpen, ShieldAlert, Award, FileText, CheckCircle2, Key } from 'lucide-react';
+import { api } from '../../services/api';
 
 interface StudentProfileProps {
   student: Student;
 }
 
 export const StudentProfile: React.FC<StudentProfileProps> = ({ student }) => {
+  const [currentPass, setCurrentPass] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+
+  const handleProfilePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPass.length < 4) {
+      setProfileError('New password must be at least 4 characters long.');
+      return;
+    }
+    setProfileLoading(true);
+    setProfileError(null);
+    setProfileSuccess(null);
+    try {
+      const res = await api.changeStudentPassword(student.cu_id, currentPass, newPass);
+      setProfileSuccess(res.message || 'Password updated successfully!');
+      setCurrentPass('');
+      setNewPass('');
+    } catch (err: any) {
+      setProfileError(err.message || 'Failed to update password. Check current password.');
+    } finally {
+      setProfileLoading(false);
+    }
+  };
   return (
-    <div className="space-y-6 animate-fadeIn pb-24 md:pb-8">
+    <div className="w-full max-w-full space-y-5 animate-fadeIn pb-24 md:pb-8 overflow-x-hidden">
       {/* Header */}
       <div className="glass-panel rounded-2xl p-6 border border-slate-800">
         <div className="flex items-center space-x-4">
@@ -89,6 +116,62 @@ export const StudentProfile: React.FC<StudentProfileProps> = ({ student }) => {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Security & Password Card */}
+      <div className="glass-panel rounded-2xl p-6 border border-slate-800 space-y-4">
+        <h3 className="text-sm font-bold uppercase tracking-wider text-sky-400 font-mono flex items-center space-x-2">
+          <Key className="w-4 h-4" />
+          <span>Security &amp; Password Management</span>
+        </h3>
+
+        {profileSuccess && (
+          <div className="p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-200 text-xs flex items-start space-x-2.5 animate-fadeIn">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+            <span>{profileSuccess}</span>
+          </div>
+        )}
+
+        {profileError && (
+          <div className="p-3.5 rounded-xl bg-red-950/60 border border-red-800/60 text-red-200 text-xs flex items-start space-x-2.5 animate-fadeIn">
+            <ShieldAlert className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+            <span>{profileError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleProfilePasswordSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1 font-medium">Current Password</label>
+            <input
+              type="password"
+              value={currentPass}
+              onChange={(e) => setCurrentPass(e.target.value)}
+              placeholder="Default is your CU ID"
+              className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-sky-500"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1 font-medium">New Password</label>
+            <input
+              type="password"
+              value={newPass}
+              onChange={(e) => setNewPass(e.target.value)}
+              placeholder="Min 4 characters"
+              className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-sky-500"
+              required
+            />
+          </div>
+          <div className="flex flex-col justify-end">
+            <button
+              type="submit"
+              disabled={profileLoading || !currentPass.trim() || !newPass.trim()}
+              className="w-full py-2.5 px-4 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold rounded-xl shadow-md transition flex items-center justify-center space-x-1.5"
+            >
+              <span>{profileLoading ? 'Updating...' : 'Update Password'}</span>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

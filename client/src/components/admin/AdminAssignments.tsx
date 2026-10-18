@@ -119,8 +119,62 @@ export const AdminAssignments: React.FC = () => {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
+      {/* Mobile Touch Cards View (< md) */}
+      <div className="md:hidden space-y-3">
+        {loading ? (
+          <div className="glass-panel rounded-2xl p-8 text-center text-slate-500 text-xs">
+            Loading assignment records...
+          </div>
+        ) : assignments.length === 0 ? (
+          <div className="glass-panel rounded-2xl p-8 text-center text-slate-500 text-xs">
+            No assignment records match the selected criteria.
+          </div>
+        ) : (
+          assignments.map((a) => (
+            <div key={a.id} className="glass-panel rounded-2xl p-4 border border-slate-800 space-y-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h4 className="text-sm font-semibold text-white break-words">{a.assignment_name}</h4>
+                  <div className="flex items-center space-x-2 mt-0.5 text-[11px] font-mono">
+                    <span className="text-sky-400 font-bold">{a.cu_id}</span>
+                    <span className="text-slate-500">•</span>
+                    <span className="text-slate-300 font-sans">{a.student_name}</span>
+                  </div>
+                </div>
+                <div className="flex-shrink-0">
+                  {getStatusBadge(a.submission_status)}
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/80 space-y-1.5 text-xs">
+                <div className="flex justify-between items-center text-[11px]">
+                  <span className="text-slate-400">Subject:</span>
+                  <span className="text-slate-200 font-medium">{a.subject}</span>
+                </div>
+                <div className="flex justify-between items-center text-[11px]">
+                  <span className="text-slate-400">Deadline:</span>
+                  <span className="text-slate-300 font-mono">{a.submission_deadline}</span>
+                </div>
+                {a.submission_date && (
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-slate-400">Submitted On:</span>
+                    <span className="text-emerald-400 font-mono">{a.submission_date}</span>
+                  </div>
+                )}
+                {a.remarks && (
+                  <div className="text-[11px] pt-1 border-t border-slate-800/60 text-slate-400">
+                    <span className="font-semibold text-slate-300">Remarks: </span>
+                    {a.remarks}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop Table (hidden on mobile, visible md+) */}
+      <div className="hidden md:block glass-panel rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-900/90 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider">

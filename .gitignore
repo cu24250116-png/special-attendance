@@ -5,3 +5,7 @@ dist/
 *.sqlite-journal
 client/dist/
 server/data/*.sqlite
+client/android/.gradle/
+client/android/app/build/
+client/android/build/
+*.log

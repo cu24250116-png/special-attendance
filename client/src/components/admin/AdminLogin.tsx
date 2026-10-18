@@ -32,11 +32,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  const fillDemo = () => {
-    setEmail('admin@college.edu');
-    setPassword('Admin@123');
-    setError(null);
-  };
+  const [showPassword, setShowPassword] = useState(false);
 
   return (
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4">
@@ -55,7 +51,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
               Administrator Portal
             </h1>
             <p className="text-sm text-slate-400 mt-2">
-              Sign in to manage student records, upload Excel attendance sheets, and control live cloud synchronization.
+              Sign in with your verified administrator credentials to access the college control console.
             </p>
           </div>
 
@@ -80,8 +76,10 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
                   type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@college.edu"
+                  placeholder="Dean@coer.edu"
                   className="w-full pl-11 pr-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm transition"
+                  autoFocus
+                  required
                 />
               </div>
             </div>
@@ -96,12 +94,21 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
                 </div>
                 <input
                   id="admin_password_input"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-11 pr-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm transition"
+                  className="w-full pl-11 pr-11 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm transition"
+                  required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-white"
+                  tabIndex={-1}
+                >
+                  <Lock className="w-4 h-4 opacity-50" />
+                </button>
               </div>
             </div>
 
@@ -113,18 +120,6 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess }) => {
               <span>{loading ? 'Authenticating...' : 'Sign In as Administrator'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
-
-            {/* Quick Demo Credentials Button */}
-            <div className="pt-4 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={fillDemo}
-                className="w-full py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-medium rounded-xl border border-slate-700 flex items-center justify-center space-x-1.5 transition"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Auto-fill Demo Credentials (admin@college.edu)</span>
-              </button>
-            </div>
           </form>
         </div>
       </div>

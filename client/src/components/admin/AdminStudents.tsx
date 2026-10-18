@@ -205,9 +205,73 @@ export const AdminStudents: React.FC = () => {
         </div>
       </div>
 
-      {/* Students Data Table */}
+      {/* Students Data Table / Mobile Cards */}
       <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-        <div className="overflow-x-auto">
+        {/* Mobile View: Student Touch Cards */}
+        <div className="md:hidden divide-y divide-slate-800/80">
+          {loading ? (
+            <div className="p-8 text-center text-slate-500 text-xs">Loading student records...</div>
+          ) : students.length === 0 ? (
+            <div className="p-8 text-center text-slate-500 text-xs">No student records found. Upload an Excel spreadsheet to import students.</div>
+          ) : (
+            students.map((student) => {
+              const pct = Math.round(student.overall_percentage * 10) / 10;
+              const isSafe = pct >= 75;
+              return (
+                <div key={student.cu_id} className="p-3.5 space-y-2 hover:bg-slate-800/40 transition">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold text-white font-['Outfit']">{student.student_name}</h3>
+                      <div className="flex items-center space-x-1.5 mt-0.5">
+                        <span className="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 font-mono text-[10px] font-bold border border-indigo-800/60">
+                          {student.cu_id}
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          {student.course} • Sem {student.semester}-{student.section}
+                        </span>
+                      </div>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider flex-shrink-0 ${
+                        isSafe
+                          ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60'
+                          : 'bg-rose-950/80 text-rose-300 border border-rose-700/60'
+                      }`}
+                    >
+                      {isSafe ? 'Safe' : 'Defaulter'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Attendance</span>
+                      <span className={`font-mono font-bold text-sm ${isSafe ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {pct}%
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Sessions (P / Total)</span>
+                      <span className="font-mono text-slate-200">
+                        <span className="text-emerald-400 font-semibold">{student.present_sessions}</span> / {student.total_sessions}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(student)}
+                      className="px-2.5 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 text-xs font-semibold flex items-center space-x-1"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop View: Full Data Table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-900/90 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider">
               <tr>

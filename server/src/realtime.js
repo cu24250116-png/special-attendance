@@ -84,6 +84,14 @@ class RealtimeHub {
     });
   }
 
+  // Broadcast a new notice / announcement to students and admins
+  broadcastAdminMessage(messageData = {}) {
+    this.broadcast('admin_message', {
+      ...messageData,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   // Heartbeat to keep connection active
   startHeartbeat() {
     setInterval(() => {

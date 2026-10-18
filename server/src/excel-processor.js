@@ -10,34 +10,59 @@ function normalizeKey(str) {
   return String(str)
     .trim()
     .toLowerCase()
+    .replace(/['’`]/g, '') // remove apostrophes so "Student's" becomes "students"
     .replace(/[^a-z0-9]/g, '_')
-    .replace(/_+/g, '_');
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 // Column aliases mapping for flexible header matching
 const COLUMN_ALIASES = {
   // Students
-  roll_number: ['roll_number', 'roll_no', 'rollno', 'roll', 'class_roll_no', 'univ_roll_no', 'university_roll_no', 's_no', 'serial_no', 'sno'],
-  cu_id: ['cu_id', 'cuid', 'student_id', 'studentid', 'student_id_no', 'college_id', 'registration_no', 'reg_no', 'enrollment_no', 'id'],
-  student_name: ['student_name', 'name', 'full_name', 'candidate_name', 'student', 'studentname'],
-  father_name: ['father_name', 'father_s_name', 'fathers_name', 'fathername', 'father', 'guardian_name', 'parent_name'],
-  course: ['course', 'program', 'degree', 'class'],
-  branch: ['branch', 'department', 'dept', 'stream', 'spec'],
+  roll_number: [
+    'roll_number', 'roll_no', 'rollno', 'roll', 'class_roll_no', 'univ_roll_no', 'university_roll_no',
+    's_no', 'serial_no', 'sno', 'sr_no', 'srno', 'sl_no', 'slno'
+  ],
+  cu_id: [
+    'cu_id', 'cuid', 'student_id', 'studentid', 'student_id_no', 'college_id', 'registration_no',
+    'reg_no', 'enrollment_no', 'enrollment', 'id', 'student_uid', 'uid', 'admission_no', 'student_code'
+  ],
+  student_name: [
+    'student_name', 'student_s_name', 'students_name', 'name', 'full_name', 'student_full_name',
+    'student_fullname', 'candidate_name', 'candidate_s_name', 'candidates_name', 'student', 'studentname',
+    'student_s', 'students', 'name_of_student', 'name_of_the_student', 'student_nam', 'std_name'
+  ],
+  father_name: [
+    'father_name', 'father_s_name', 'fathers_name', 'fathername', 'father', 'guardian_name',
+    'parent_name', 'father_full_name', 'father_s'
+  ],
+  course: ['course', 'program', 'programme', 'degree', 'class'],
+  branch: ['branch', 'department', 'dept', 'stream', 'spec', 'specialization'],
   semester: ['semester', 'sem', 'term'],
   section: ['section', 'sec', 'group', 'batch'],
-  email: ['email', 'email_id', 'mail'],
-  phone: ['phone', 'mobile', 'contact', 'phone_number'],
+  email: ['email', 'email_id', 'mail', 'student_email', 'email_address'],
+  phone: ['phone', 'mobile', 'contact', 'phone_number', 'mobile_no', 'contact_no'],
 
   // Attendance in student master sheet
-  total_sessions: ['class_conducted', 'classes_conducted', 'total_classes', 'total_sessions', 'total', 'sessions', 'classes_held', 'conducted', 'held'],
-  present_sessions: ['total_present', 'present', 'present_sessions', 'attended', 'attended_sessions'],
-  absent_sessions: ['total_absent', 'absent', 'absent_sessions', 'missed', 'missed_sessions'],
-  attendance_percentage: ['total_percentage', 'percentage', 'attendance_percentage', 'pct', 'percent', '%', 'total_%', 'overall_percentage', 'att_%'],
+  total_sessions: [
+    'class_conducted', 'classes_conducted', 'total_classes', 'total_sessions', 'total', 'sessions',
+    'classes_held', 'conducted', 'held', 'total_held', 'classes'
+  ],
+  present_sessions: [
+    'total_present', 'present', 'present_sessions', 'attended', 'attended_sessions', 'classes_attended', 'pres'
+  ],
+  absent_sessions: [
+    'total_absent', 'absent', 'absent_sessions', 'missed', 'missed_sessions', 'classes_absent', 'abs'
+  ],
+  attendance_percentage: [
+    'total_percentage', 'percentage', 'attendance_percentage', 'pct', 'percent', '%', 'total_%',
+    'overall_percentage', 'att_%', 'att_percentage', 'attendance_%'
+  ],
   status: ['status', 'attendance_status'],
 
   // Attendance specific sheet
   attendance_date: ['attendance_date', 'date', 'session_date', 'day'],
-  subject: ['subject', 'course_code', 'subject_name', 'course_name', 'module'],
+  subject: ['subject', 'course_code', 'subject_name', 'course_name', 'module', 'sub'],
 
   // Assignments
   assignment_id: ['assignment_id', 'assign_id', 'assignment_no', 'task_id', 'code'],
@@ -53,18 +78,29 @@ function isDateColumnHeader(key) {
   if (!key) return false;
   const k = String(key).trim();
   const normKey = normalizeKey(k);
+  const withUnderscoreNorm = k.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  const compactKey = normKey.replace(/_/g, '');
 
   // Exclude known metadata columns
   for (const list of Object.values(COLUMN_ALIASES)) {
-    if (list.includes(normKey)) return false;
+    if (
+      list.includes(normKey) ||
+      list.includes(withUnderscoreNorm) ||
+      list.some(a => a.replace(/_/g, '') === compactKey)
+    ) {
+      return false;
+    }
   }
 
-  // Check date patterns like 15/10/2024, 2024-10-15, 15-10-24, 15.10.2024, 15/10, etc.
+  // Check Excel serial date number
+  if (!isNaN(k) && Number(k) > 20000 && Number(k) < 60000) return true;
+
+  // Check date patterns like 10/09/2024, 2024-09-10, 10-09-24, 10.09.2024, 10/09, 10/10/26, etc.
   if (/\b\d{1,4}[-/.]\d{1,2}([-/.]\d{1,4})?\b/.test(k)) return true;
-  // Check month words like 15-Oct, 15 Oct, Oct-15, etc.
-  if (/\b\d{1,2}[-/\s]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(k)) return true;
+  // Check month words like 10-Sep, 10 Sep, 10-Oct-26, September 10, etc.
+  if (/\b\d{1,2}[-/\s]?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|september|oct|nov|dec)/i.test(k)) return true;
   // Check explicit naming
-  if (/(date|special.*class|class.*date|session)/i.test(k)) return true;
+  if (/(date|special.*class|class.*date|session|exam.*date|assign.*date)/i.test(k)) return true;
 
   // Check if string can parse as calendar date
   const d = new Date(k);
@@ -84,8 +120,15 @@ export class ExcelProcessor {
       let foundValue = undefined;
 
       for (const key of keys) {
-        const normKey = normalizeKey(key);
-        if (aliases.includes(normKey)) {
+        const rawNorm = normalizeKey(key);
+        const withUnderscoreNorm = String(key).trim().toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+        const compactKey = rawNorm.replace(/_/g, '');
+
+        if (
+          aliases.includes(rawNorm) ||
+          aliases.includes(withUnderscoreNorm) ||
+          aliases.some(a => a.replace(/_/g, '') === compactKey)
+        ) {
           foundValue = rawRow[key];
           break;
         }
@@ -124,7 +167,9 @@ export class ExcelProcessor {
     // Check sheets
     for (const name of sheetNames) {
       const lower = name.toLowerCase().trim();
-      const rows = sheetsData[name] || [];
+      const rows = (sheetsData[name] || []).filter((r) =>
+        Object.values(r).some((v) => v !== undefined && v !== null && String(v).trim() !== '')
+      );
 
       if (lower.includes('student') || sheetNames.length === 1) {
         previewStudents = rows.slice(0, 10).map((r) => this.mapRowFields(r, [
@@ -139,14 +184,19 @@ export class ExcelProcessor {
     }
 
     if (previewStudents.length === 0 && sheetNames.length > 0) {
-      const firstRows = sheetsData[sheetNames[0]] || [];
+      const firstRows = (sheetsData[sheetNames[0]] || []).filter((r) =>
+        Object.values(r).some((v) => v !== undefined && v !== null && String(v).trim() !== '')
+      );
       previewStudents = firstRows.slice(0, 10).map((r) => this.mapRowFields(r, Object.keys(COLUMN_ALIASES)));
     }
+
+    const nonBlankStudentRows = (sheetsData['Students'] || sheetsData['students'] || sheetsData[sheetNames[0]] || [])
+      .filter((r) => Object.values(r).some((v) => v !== undefined && v !== null && String(v).trim() !== ''));
 
     return {
       sheetNames,
       totalRows: {
-        students: (sheetsData['Students'] || sheetsData['students'] || sheetsData[sheetNames[0]] || []).length,
+        students: nonBlankStudentRows.length,
         attendance: (sheetsData['Attendance'] || sheetsData['attendance'] || []).length,
         assignments: (sheetsData['Assignments'] || sheetsData['assignments'] || []).length,
       },
@@ -159,23 +209,120 @@ export class ExcelProcessor {
     };
   }
 
-  // Format date safely
+  // Format date safely to YYYY-MM-DD
   static formatDate(val) {
     if (!val) return '';
     if (val instanceof Date) {
-      return val.toISOString().split('T')[0];
+      const y = val.getFullYear();
+      const m = String(val.getMonth() + 1).padStart(2, '0');
+      const d = String(val.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
     }
     const str = String(val).trim();
-    // Excel numeric date check
+
+    // Excel numeric date serial
     if (!isNaN(str) && Number(str) > 20000 && Number(str) < 60000) {
       const date = new Date(Math.round((Number(str) - 25569) * 86400 * 1000));
-      return date.toISOString().split('T')[0];
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
     }
+
+    // Pattern DD/MM/YYYY or MM/DD/YYYY or DD-MM-YYYY or MM-DD-YYYY or DD.MM.YYYY
+    const ddmmyyyy = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+    if (ddmmyyyy) {
+      const p1 = parseInt(ddmmyyyy[1], 10);
+      const p2 = parseInt(ddmmyyyy[2], 10);
+      let y = ddmmyyyy[3];
+      if (y.length === 2) y = '20' + y;
+
+      let m, d;
+      if (p1 > 12 && p2 <= 12) {
+        // e.g. 25/10/26 -> Day is 25, Month is 10
+        d = p1;
+        m = p2;
+      } else if (p2 > 12 && p1 <= 12) {
+        // e.g. 10/25/26 -> Month is 10, Day is 25
+        m = p1;
+        d = p2;
+      } else {
+        // Both <= 12 (e.g. 10/11/26)
+        // If p1 is 10 and year is 2026, it's October (MM/DD/YY as in the college attendance file)
+        if (p1 === 10) {
+          m = p1;
+          d = p2;
+        } else {
+          d = p1;
+          m = p2;
+        }
+      }
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+
+    // Pattern DD-Mon or DD Mon or DD-Mon-YYYY (e.g. 10-Sep, 10 Sep 2024, 10 September)
+    const monthNames = {
+      jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+      jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+      september: '09', october: '10', november: '11', december: '12',
+      january: '01', february: '02', march: '03', april: '04', june: '06',
+      july: '07', august: '08', sept: '09'
+    };
+    const ddMon = str.match(/^(\d{1,2})[-/\s]+([a-zA-Z]+)(?:[-/\s]+(\d{2,4}))?$/);
+    if (ddMon) {
+      const d = ddMon[1].padStart(2, '0');
+      const monStr = ddMon[2].toLowerCase();
+      const m = monthNames[monStr] || monthNames[monStr.slice(0, 3)];
+      if (m) {
+        let y = ddMon[3] || '2026';
+        if (y.length === 2) y = '20' + y;
+        return `${y}-${m}-${d}`;
+      }
+    }
+
+    // Pattern DD/MM or MM/DD (assume year 2026)
+    const ddmm = str.match(/^(\d{1,2})[-/.](\d{1,2})$/);
+    if (ddmm) {
+      const p1 = parseInt(ddmm[1], 10);
+      const p2 = parseInt(ddmm[2], 10);
+      let m = p2;
+      let d = p1;
+      if (p2 > 12 && p1 <= 12) {
+        m = p1;
+        d = p2;
+      }
+      return `2026-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+
+    // ISO format YYYY-MM-DD
+    const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+    }
+
     const d = new Date(str);
     if (!isNaN(d.getTime())) {
-      return d.toISOString().split('T')[0];
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
     }
     return str;
+  }
+
+  // Format YYYY-MM-DD to human friendly string (e.g. 10 Sep 2024)
+  static formatDisplayDate(val) {
+    if (!val) return '';
+    const iso = this.formatDate(val);
+    const parts = iso.split('-');
+    if (parts.length === 3) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const mIdx = parseInt(parts[1], 10) - 1;
+      const mon = months[mIdx] || parts[1];
+      const day = parseInt(parts[2], 10);
+      return `${day} ${mon} ${parts[0]}`;
+    }
+    return String(val);
   }
 
   // Perform full import into database
@@ -211,44 +358,54 @@ export class ExcelProcessor {
 
     totalRows = studentRows.length + attendanceRows.length + assignmentRows.length;
 
-    // 1. Process Students & Embedded Special Class Date Columns
-    for (let i = 0; i < studentRows.length; i++) {
-      const raw = studentRows[i];
-      const mapped = this.mapRowFields(raw, [
-        'roll_number', 'cu_id', 'student_name', 'father_name', 'course', 'branch',
-        'semester', 'section', 'email', 'phone', 'total_sessions', 'present_sessions',
-        'absent_sessions', 'attendance_percentage'
-      ]);
+    db.startBatch();
+    try {
+      // 1. Process Students & Embedded Special Class Date Columns
+      for (let i = 0; i < studentRows.length; i++) {
+        const raw = studentRows[i];
 
-      // CU ID priority: cu_id -> student_id -> roll_number
-      let cuId = mapped.cu_id ? String(mapped.cu_id).trim().toUpperCase() : null;
-      if (!cuId && mapped.roll_number) {
-        cuId = String(mapped.roll_number).trim().toUpperCase();
-      }
+        // Skip completely empty or blank rows silently
+        const hasAnyContent = Object.values(raw).some(
+          (v) => v !== undefined && v !== null && String(v).trim() !== ''
+        );
+        if (!hasAnyContent) {
+          continue;
+        }
 
-      const studentName = mapped.student_name ? String(mapped.student_name).trim() : null;
+        const mapped = this.mapRowFields(raw, [
+          'roll_number', 'cu_id', 'student_name', 'father_name', 'course', 'branch',
+          'semester', 'section', 'email', 'phone', 'total_sessions', 'present_sessions',
+          'absent_sessions', 'attendance_percentage'
+        ]);
 
-      if (!cuId) {
-        errors.push({
-          sheet_name: 'Students',
-          row_number: i + 2,
-          cu_id: null,
-          error_message: 'Missing mandatory Student ID / CU ID / Roll Number',
-          raw_data: JSON.stringify(raw),
-        });
-        continue;
-      }
+        // CU ID priority: cu_id -> student_id -> roll_number
+        let cuId = mapped.cu_id ? String(mapped.cu_id).trim().toUpperCase() : null;
+        if (!cuId && mapped.roll_number) {
+          cuId = String(mapped.roll_number).trim().toUpperCase();
+        }
 
-      if (!studentName) {
-        errors.push({
-          sheet_name: 'Students',
-          row_number: i + 2,
-          cu_id: cuId,
-          error_message: 'Missing mandatory Student Name',
-          raw_data: JSON.stringify(raw),
-        });
-        continue;
-      }
+        let studentName = mapped.student_name ? String(mapped.student_name).trim() : null;
+
+        // If neither CU ID nor student name exists, skip row as non-data / spacer row
+        if (!cuId && !studentName) {
+          continue;
+        }
+
+        if (!cuId) {
+          errors.push({
+            sheet_name: 'Students',
+            row_number: i + 2,
+            cu_id: null,
+            error_message: 'Missing mandatory Student ID / CU ID / Roll Number',
+            raw_data: JSON.stringify(raw),
+          });
+          continue;
+        }
+
+        if (!studentName) {
+          // If CU ID is known but name is empty, fallback to default student label so record is preserved
+          studentName = `Student ${cuId}`;
+        }
 
       affectedCuIds.add(cuId);
 
@@ -264,11 +421,31 @@ export class ExcelProcessor {
       let embeddedPresentCount = 0;
 
       for (const dateKey of dateColumns) {
-        const cellVal = String(raw[dateKey] || '').trim().toUpperCase();
-        if (!cellVal) continue; // empty cell, no record for this date
+        const rawCell = raw[dateKey];
+        const cellVal = String(rawCell !== undefined && rawCell !== null ? rawCell : '').trim();
+        const upperVal = cellVal.toUpperCase();
 
         embeddedHeldCount++;
-        const isPresent = cellVal === 'P' || cellVal === 'PRESENT' || cellVal === '1' || cellVal === 'YES';
+
+        // User requirement:
+        // "data set mein jis student ke aage jis date ke aage jo number likha hua hai,
+        // wo uske number of present, number of uploaded assignment ho jayenge.
+        // Agar wo likha hua hai to tum unko wahan present kar dena. Agar kuch nahi likha hua to absent."
+        let numUploaded = 0;
+        let isPresent = false;
+
+        const parsedNum = parseFloat(cellVal);
+        if (!isNaN(parsedNum) && parsedNum > 0) {
+          numUploaded = Math.round(parsedNum);
+          isPresent = true;
+        } else if (upperVal === 'P' || upperVal === 'PRESENT' || upperVal === 'YES' || upperVal === 'SUBMITTED' || upperVal === 'DONE') {
+          numUploaded = 1;
+          isPresent = true;
+        } else {
+          numUploaded = 0;
+          isPresent = false;
+        }
+
         if (isPresent) embeddedPresentCount++;
 
         const formattedDate = this.formatDate(dateKey) || dateKey;
@@ -277,7 +454,7 @@ export class ExcelProcessor {
         const presentCount = isPresent ? 1 : 0;
         const absentCount = isPresent ? 0 : 1;
 
-        // Upsert attendance record for this special class date
+        // 1. Upsert attendance record for this special class date
         const existingAtt = await db.get(
           'SELECT id FROM attendance_records WHERE cu_id = ? AND attendance_date = ?',
           [cuId, formattedDate]
@@ -289,19 +466,59 @@ export class ExcelProcessor {
               total_sessions = 1,
               present_sessions = ?,
               absent_sessions = ?,
+              assignments_uploaded = ?,
+              import_job_id = ?,
               attendance_percentage = ?,
               status = ?
             WHERE id = ?
-          `, [presentCount, absentCount, pct, status, existingAtt.id]);
+          `, [presentCount, absentCount, numUploaded, jobId, pct, status, existingAtt.id]);
         } else {
           await db.run(`
             INSERT INTO attendance_records (
               id, cu_id, attendance_date, subject, total_sessions, present_sessions,
-              absent_sessions, attendance_percentage, status, created_at
-            ) VALUES (?, ?, ?, 'Special Class', 1, ?, ?, ?, ?, ?)
-          `, [uuidv4(), cuId, formattedDate, presentCount, absentCount, pct, status, now]);
+              absent_sessions, assignments_uploaded, import_job_id, attendance_percentage, status, created_at
+            ) VALUES (?, ?, ?, 'Special Class', 1, ?, ?, ?, ?, ?, ?, ?)
+          `, [uuidv4(), cuId, formattedDate, presentCount, absentCount, numUploaded, jobId, pct, status, now]);
         }
         attendanceUpdated++;
+
+        // 2. Also Upsert assignment record for this special exam date
+        const cleanDateId = formattedDate.replace(/[^a-zA-Z0-9]/g, '-');
+        const assignId = `ASN-${cleanDateId}`;
+        const displayDate = this.formatDisplayDate(formattedDate) || dateKey;
+        const assignTitle = `Special Exam Assignment (${displayDate})`;
+        const assignStatus = isPresent ? 'Submitted' : 'Pending';
+        const submissionDate = isPresent ? formattedDate : null;
+        const remarks = isPresent
+          ? `Uploaded ${numUploaded} assignment(s) on special day`
+          : 'Assignment not uploaded / absent on special day';
+
+        const existingAssign = await db.get(
+          'SELECT id FROM assignments WHERE cu_id = ? AND (assignment_id = ? OR submission_deadline = ?)',
+          [cuId, assignId, formattedDate]
+        );
+
+        if (existingAssign) {
+          await db.run(`
+            UPDATE assignments SET
+              assignment_name = ?,
+              subject = 'Special Class',
+              submission_deadline = ?,
+              submission_status = ?,
+              submission_date = ?,
+              remarks = ?,
+              import_job_id = ?
+            WHERE id = ?
+          `, [assignTitle, formattedDate, assignStatus, submissionDate, remarks, jobId, existingAssign.id]);
+        } else {
+          await db.run(`
+            INSERT INTO assignments (
+              id, assignment_id, cu_id, assignment_name, subject, submission_deadline,
+              submission_status, submission_date, remarks, import_job_id, created_at
+            ) VALUES (?, ?, ?, ?, 'Special Class', ?, ?, ?, ?, ?, ?)
+          `, [uuidv4(), assignId, cuId, assignTitle, formattedDate, assignStatus, submissionDate, remarks, jobId, now]);
+        }
+        assignmentsUpdated++;
       }
 
       // Calculate totals: prioritize explicit columns if present; otherwise use embedded counts
@@ -344,6 +561,7 @@ export class ExcelProcessor {
             total_sessions = ?,
             present_sessions = ?,
             absent_sessions = ?,
+            import_job_id = COALESCE(?, import_job_id),
             last_updated = ?
           WHERE cu_id = ?
         `, [
@@ -361,6 +579,7 @@ export class ExcelProcessor {
           totalHeld,
           totalPres,
           totalAbs,
+          jobId,
           now,
           cuId
         ]);
@@ -369,8 +588,8 @@ export class ExcelProcessor {
           INSERT INTO students (
             cu_id, student_name, roll_number, father_name, course, branch, semester, section,
             email, phone, password_hash, overall_percentage, total_sessions, present_sessions,
-            absent_sessions, last_updated
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            absent_sessions, import_job_id, last_updated
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           cuId,
           studentName,
@@ -387,6 +606,7 @@ export class ExcelProcessor {
           totalHeld,
           totalPres,
           totalAbs,
+          jobId,
           now
         ]);
       }
@@ -470,17 +690,18 @@ export class ExcelProcessor {
             present_sessions = ?,
             absent_sessions = ?,
             attendance_percentage = ?,
-            status = ?
+            status = ?,
+            import_job_id = COALESCE(?, import_job_id)
           WHERE id = ?
-        `, [total, present, absent, pct, status, existingRecord.id]);
+        `, [total, present, absent, pct, status, jobId, existingRecord.id]);
       } else {
         const recordId = uuidv4();
         await db.run(`
           INSERT INTO attendance_records (
             id, cu_id, attendance_date, subject, total_sessions, present_sessions,
-            absent_sessions, attendance_percentage, status, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [recordId, cuId, date, subject, total, present, absent, pct, status, now]);
+            absent_sessions, import_job_id, attendance_percentage, status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [recordId, cuId, date, subject, total, present, absent, jobId, pct, status, now]);
       }
       attendanceUpdated++;
     }
@@ -547,17 +768,18 @@ export class ExcelProcessor {
             submission_deadline = ?,
             submission_status = ?,
             submission_date = ?,
-            remarks = ?
+            remarks = ?,
+            import_job_id = COALESCE(?, import_job_id)
           WHERE id = ?
-        `, [title, subject, deadline, status, submissionDate, remarks, existingAssign.id]);
+        `, [title, subject, deadline, status, submissionDate, remarks, jobId, existingAssign.id]);
       } else {
         const id = uuidv4();
         await db.run(`
           INSERT INTO assignments (
             id, assignment_id, cu_id, assignment_name, subject, submission_deadline,
-            submission_status, submission_date, remarks, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [id, assignId, cuId, title, subject, deadline, status, submissionDate, remarks, now]);
+            submission_status, submission_date, remarks, import_job_id, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [id, assignId, cuId, title, subject, deadline, status, submissionDate, remarks, jobId, now]);
       }
       assignmentsUpdated++;
     }
@@ -582,18 +804,21 @@ export class ExcelProcessor {
       `, [uuidv4(), jobId, err.sheet_name, err.row_number, err.cu_id, err.error_message, err.raw_data]);
     }
 
-    return {
-      jobId,
-      status,
-      filename,
-      totalRows,
-      studentsUpdated,
-      attendanceUpdated,
-      assignmentsUpdated,
-      errorsCount: errors.length,
-      errors: errors.slice(0, 50),
-      affectedStudents: Array.from(affectedCuIds),
-    };
+      return {
+        jobId,
+        status,
+        filename,
+        totalRows,
+        studentsUpdated,
+        attendanceUpdated,
+        assignmentsUpdated,
+        errorsCount: errors.length,
+        errors: errors.slice(0, 50),
+        affectedStudents: Array.from(affectedCuIds),
+      };
+    } finally {
+      db.endBatch();
+    }
   }
 
   // Generate official downloadable Excel Template (.xlsx) matching user columns
@@ -619,6 +844,8 @@ export class ExcelProcessor {
       views: [{ state: 'frozen', ySplit: 1 }],
     });
 
+    // The exact 8 special exam dates from user's Excel sheet:
+    // 10-Oct-26, 11-Oct-26, 17-Oct-26, 18-Oct-26, 19-Oct-26, 20-Oct-26, 24-Oct-26, 25-Oct-26
     masterSheet.columns = [
       { header: 'Roll_Number', key: 'roll_number', width: 14 },
       { header: 'Student_ID', key: 'student_id', width: 16 },
@@ -630,15 +857,22 @@ export class ExcelProcessor {
       { header: 'Class_Conducted', key: 'class_conducted', width: 16 },
       { header: 'Total_Present', key: 'total_present', width: 14 },
       { header: 'Total_Percentage', key: 'total_percentage', width: 18 },
-      { header: '15/10/2024', key: 'date_1', width: 14 },
-      { header: '16/10/2024', key: 'date_2', width: 14 },
-      { header: '17/10/2024', key: 'date_3', width: 14 },
-      { header: '18/10/2024', key: 'date_4', width: 14 },
-      { header: '19/10/2024', key: 'date_5', width: 14 },
+      { header: '10-Oct-26', key: 'date_1', width: 14 },
+      { header: '11-Oct-26', key: 'date_2', width: 14 },
+      { header: '17-Oct-26', key: 'date_3', width: 14 },
+      { header: '18-Oct-26', key: 'date_4', width: 14 },
+      { header: '19-Oct-26', key: 'date_5', width: 14 },
+      { header: '20-Oct-26', key: 'date_6', width: 14 },
+      { header: '24-Oct-26', key: 'date_7', width: 14 },
+      { header: '25-Oct-26', key: 'date_8', width: 14 },
     ];
 
     masterSheet.getRow(1).eachCell(cell => Object.assign(cell, headerStyle));
 
+    // Per user instructions:
+    // The number in the date column represents the number of assignments uploaded on that special day.
+    // > 0 = Present with that assignment count.
+    // 0 or blank = Absent with 0 assignments.
     masterSheet.addRows([
       {
         roll_number: '101',
@@ -651,11 +885,14 @@ export class ExcelProcessor {
         class_conducted: 20,
         total_present: 18,
         total_percentage: 90,
-        date_1: 'P',
-        date_2: 'P',
-        date_3: 'P',
-        date_4: 'P',
-        date_5: 'P',
+        date_1: 1,
+        date_2: 1,
+        date_3: 2,
+        date_4: 1,
+        date_5: 1,
+        date_6: 1,
+        date_7: 1,
+        date_8: 0,
       },
       {
         roll_number: '102',
@@ -668,11 +905,14 @@ export class ExcelProcessor {
         class_conducted: 20,
         total_present: 19,
         total_percentage: 95,
-        date_1: 'P',
-        date_2: 'P',
-        date_3: 'P',
-        date_4: 'P',
-        date_5: 'P',
+        date_1: 1,
+        date_2: 1,
+        date_3: 1,
+        date_4: 1,
+        date_5: 1,
+        date_6: 1,
+        date_7: 1,
+        date_8: 1,
       },
     ]);
 
@@ -708,6 +948,87 @@ export class ExcelProcessor {
     }
 
     return await workbook.xlsx.writeBuffer();
+  }
+
+  // Delete an imported Excel dataset and its associated attendance and assignment records
+  static async deleteImportJob(jobId) {
+    const job = await db.get('SELECT * FROM import_jobs WHERE id = ?', [jobId]);
+    if (!job) {
+      throw new Error(`Import dataset with ID "${jobId}" not found`);
+    }
+
+    db.startBatch();
+    try {
+      // 1. Delete attendance records created by this job
+      await db.run('DELETE FROM attendance_records WHERE import_job_id = ?', [jobId]);
+
+      // 2. Delete assignments created by this job
+      await db.run('DELETE FROM assignments WHERE import_job_id = ?', [jobId]);
+
+      // 3. Delete students created exclusively by this job in bulk
+      await db.run(`
+        DELETE FROM students
+        WHERE import_job_id = ?
+          AND cu_id NOT IN (SELECT DISTINCT cu_id FROM attendance_records)
+          AND cu_id NOT IN (SELECT DISTINCT cu_id FROM assignments)
+      `, [jobId]);
+
+      await db.run('UPDATE students SET import_job_id = NULL WHERE import_job_id = ?', [jobId]);
+
+      // 4. Delete import errors
+      await db.run('DELETE FROM import_errors WHERE job_id = ?', [jobId]);
+
+      // 5. Delete the job record
+      await db.run('DELETE FROM import_jobs WHERE id = ?', [jobId]);
+    } finally {
+      db.endBatch();
+    }
+
+    // Trigger background export to keep offline data in sync
+    try {
+      const { spawn } = await import('child_process');
+      const exportScript = path.join(__dirname, '..', '..', 'scripts', 'export-bundled-data.js');
+      const exportProc = spawn(process.execPath, [exportScript], { stdio: 'ignore' });
+      exportProc.unref();
+    } catch (exportErr) {
+      console.warn('Could not trigger background bundle export:', exportErr);
+    }
+
+    return {
+      success: true,
+      jobId,
+      filename: job.filename,
+      message: `Successfully deleted Excel sheet "${job.filename}" and removed its imported records.`
+    };
+  }
+
+  // Clear all imported Excel datasets, student rosters, attendance and assignments (keeps admin logins)
+  static async clearAllData() {
+    db.startBatch();
+    try {
+      await db.run('DELETE FROM attendance_records');
+      await db.run('DELETE FROM assignments');
+      await db.run('DELETE FROM students');
+      await db.run('DELETE FROM import_errors');
+      await db.run('DELETE FROM import_jobs');
+    } finally {
+      db.endBatch();
+    }
+
+    // Trigger background export to keep offline data in sync
+    try {
+      const { spawn } = await import('child_process');
+      const exportScript = path.join(__dirname, '..', '..', 'scripts', 'export-bundled-data.js');
+      const exportProc = spawn(process.execPath, [exportScript], { stdio: 'ignore' });
+      exportProc.unref();
+    } catch (exportErr) {
+      console.warn('Could not trigger background bundle export:', exportErr);
+    }
+
+    return {
+      success: true,
+      message: 'All imported student rosters, attendance records, and Excel history have been reset successfully.'
+    };
   }
 }
 

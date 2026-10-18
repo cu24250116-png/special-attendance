@@ -135,7 +135,10 @@ class CloudSyncService {
   async checkAndSync() {
     const config = await db.get('SELECT * FROM cloud_sync_configurations WHERE is_enabled = 1 LIMIT 1');
     if (!config) return;
-    // Automatic periodic check
+    // Do not run automated periodic sync on dummy/demo placeholders
+    if (!config.folder_or_file_id || config.folder_or_file_id === '1A2B3C4D_DemoFolderId') {
+      return;
+    }
     await this.triggerManualSync();
   }
 }

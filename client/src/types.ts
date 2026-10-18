@@ -14,6 +14,30 @@ export interface Student {
   present_sessions: number;
   absent_sessions: number;
   last_updated: string;
+  special_class_attendance?: SpecialClassAttendance;
+}
+
+export interface SpecialDateItem {
+  date: string;
+  formattedDate: string;
+  dayNumber?: number;
+  assignmentsUploaded: number;
+  isUploaded: boolean;
+  status: 'Present' | 'Absent' | string;
+  submissionStatus: 'Submitted' | 'Pending' | string;
+  weight: number;
+  percentageContribution: number;
+  recordId?: string | null;
+  assignmentId?: string | null;
+}
+
+export interface SpecialClassAttendance {
+  totalSpecialDates: number;
+  uploadedCount: number;
+  pendingCount: number;
+  weightPerDay: number;
+  specialAttendancePercentage: number;
+  specialDates: SpecialDateItem[];
 }
 
 export interface AttendanceRecord {
@@ -31,11 +55,14 @@ export interface AttendanceRecord {
 
 export interface DailyAttendanceSummary {
   date: string;
+  formattedDate?: string;
   totalHeld: number;
   totalPresent: number;
   totalAbsent: number;
   percentage: number;
   status: 'Present' | 'Absent' | 'Partial' | string;
+  assignmentsUploaded?: number;
+  percentageContribution?: number;
   sessions: AttendanceRecord[];
 }
 
@@ -101,4 +128,15 @@ export interface User {
   email: string;
   username: string;
   role: 'admin' | 'student';
+}
+
+export interface AdminMessage {
+  id: string;
+  sender_title: string;
+  message: string;
+  target_type: 'all' | 'department' | string;
+  target_value?: string | null;
+  priority: 'normal' | 'urgent' | string;
+  created_at: string;
+  created_by?: string;
 }
