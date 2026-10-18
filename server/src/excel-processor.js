@@ -358,8 +358,30 @@ export class ExcelProcessor {
 
     totalRows = studentRows.length + attendanceRows.length + assignmentRows.length;
 
-    db.startBatch();
-    try {
+    return await db.transaction(async (tx) => {
+      // Pre-load existing records into memory maps to avoid 30,000+ round-trip SELECT queries
+      const existingStudentsList = await tx.all('SELECT cu_id, id, password_hash, roll_number, father_name, course, branch, semester, section, email, phone FROM students');
+      const existingStudentsMap = new Map();
+      for (const s of existingStudentsList) {
+        if (s.cu_id) existingStudentsMap.set(String(s.cu_id).toUpperCase().trim(), s);
+      }
+
+      const existingAttList = await tx.all('SELECT id, cu_id, attendance_date FROM attendance_records');
+      const existingAttMap = new Map();
+      for (const a of existingAttList) {
+        if (a.cu_id && a.attendance_date) {
+          existingAttMap.set(`${String(a.cu_id).toUpperCase().trim()}#${a.attendance_date}`, a.id);
+        }
+      }
+
+      const existingAssignList = await tx.all('SELECT id, cu_id, assignment_id, submission_deadline FROM assignments');
+      const existingAssignMap = new Map();
+      for (const as of existingAssignList) {
+        const uCu = String(as.cu_id || '').toUpperCase().trim();
+        if (as.assignment_id) existingAssignMap.set(`${uCu}#${as.assignment_id}`, as.id);
+        if (as.submission_deadline) existingAssignMap.set(`${uCu}#${as.submission_deadline}`, as.id);
+      }
+
       // 1. Process Students & Embedded Special Class Date Columns
       for (let i = 0; i < studentRows.length; i++) {
         const raw = studentRows[i];
@@ -403,7 +425,6 @@ export class ExcelProcessor {
         }
 
         if (!studentName) {
-          // If CU ID is known but name is empty, fallback to default student label so record is preserved
           studentName = `Student ${cuId}`;
         }
 
@@ -424,404 +445,416 @@ export class ExcelProcessor {
 
         affectedCuIds.add(cuId);
 
-      // Student Password: By default, the student's password is their CU ID (or roll number)
-      const defaultPassword = cuId;
-      const studentPasswordHash = hashPassword(defaultPassword);
+        // Student Password: By default, the student's password is their CU ID (or roll number)
+        const defaultPassword = cuId;
+        const studentPasswordHash = hashPassword(defaultPassword);
 
-      // Extract special class date columns in this student row
-      const rawKeys = Object.keys(raw);
-      const dateColumns = rawKeys.filter((k) => isDateColumnHeader(k));
+        // Extract special class date columns in this student row
+        const rawKeys = Object.keys(raw);
+        const dateColumns = rawKeys.filter((k) => isDateColumnHeader(k));
 
-      let embeddedHeldCount = 0;
-      let embeddedPresentCount = 0;
+        let embeddedHeldCount = 0;
+        let embeddedPresentCount = 0;
+        const parsedDateEntries = [];
 
-      for (const dateKey of dateColumns) {
-        const rawCell = raw[dateKey];
-        const cellVal = String(rawCell !== undefined && rawCell !== null ? rawCell : '').trim();
-        const upperVal = cellVal.toUpperCase();
+        for (const dateKey of dateColumns) {
+          const rawCell = raw[dateKey];
+          const cellVal = String(rawCell !== undefined && rawCell !== null ? rawCell : '').trim();
+          const upperVal = cellVal.toUpperCase();
 
-        embeddedHeldCount++;
+          embeddedHeldCount++;
 
-        // User requirement:
-        // "data set mein jis student ke aage jis date ke aage jo number likha hua hai,
-        // wo uske number of present, number of uploaded assignment ho jayenge.
-        // Agar wo likha hua hai to tum unko wahan present kar dena. Agar kuch nahi likha hua to absent."
-        let numUploaded = 0;
-        let isPresent = false;
+          let numUploaded = 0;
+          let isPresent = false;
 
-        const parsedNum = parseFloat(cellVal);
-        if (!isNaN(parsedNum) && parsedNum > 0) {
-          numUploaded = Math.round(parsedNum);
-          isPresent = true;
-        } else if (upperVal === 'P' || upperVal === 'PRESENT' || upperVal === 'YES' || upperVal === 'SUBMITTED' || upperVal === 'DONE') {
-          numUploaded = 1;
-          isPresent = true;
-        } else {
-          numUploaded = 0;
-          isPresent = false;
+          const parsedNum = parseFloat(cellVal);
+          if (!isNaN(parsedNum) && parsedNum > 0) {
+            numUploaded = Math.round(parsedNum);
+            isPresent = true;
+          } else if (upperVal === 'P' || upperVal === 'PRESENT' || upperVal === 'YES' || upperVal === 'SUBMITTED' || upperVal === 'DONE') {
+            numUploaded = 1;
+            isPresent = true;
+          } else {
+            numUploaded = 0;
+            isPresent = false;
+          }
+
+          if (isPresent) embeddedPresentCount++;
+
+          const formattedDate = this.formatDate(dateKey) || dateKey;
+          const status = isPresent ? 'Present' : 'Absent';
+          const pct = isPresent ? 100 : 0;
+          const presentCount = isPresent ? 1 : 0;
+          const absentCount = isPresent ? 0 : 1;
+
+          parsedDateEntries.push({
+            dateKey,
+            formattedDate,
+            isPresent,
+            numUploaded,
+            presentCount,
+            absentCount,
+            status,
+            pct
+          });
         }
 
-        if (isPresent) embeddedPresentCount++;
+        // Calculate totals: prioritize explicit columns if present; otherwise use embedded counts
+        let totalHeld = parseInt(mapped.total_sessions, 10);
+        let totalPres = parseInt(mapped.present_sessions, 10);
+        let totalAbs = parseInt(mapped.absent_sessions, 10);
 
-        const formattedDate = this.formatDate(dateKey) || dateKey;
-        const status = isPresent ? 'Present' : 'Absent';
-        const pct = isPresent ? 100 : 0;
-        const presentCount = isPresent ? 1 : 0;
-        const absentCount = isPresent ? 0 : 1;
+        if (isNaN(totalHeld) || totalHeld <= 0) {
+          totalHeld = embeddedHeldCount > 0 ? embeddedHeldCount : 0;
+        }
+        if (isNaN(totalPres)) {
+          totalPres = embeddedPresentCount;
+        }
+        if (isNaN(totalAbs)) {
+          totalAbs = Math.max(0, totalHeld - totalPres);
+        }
 
-        // 1. Upsert attendance record for this special class date
-        const existingAtt = await db.get(
-          'SELECT id FROM attendance_records WHERE cu_id = ? AND attendance_date = ?',
-          [cuId, formattedDate]
-        );
+        // Calculate percentage
+        let finalPercentage = parseFloat(mapped.attendance_percentage);
+        if (isNaN(finalPercentage) || finalPercentage <= 0) {
+          finalPercentage = totalHeld > 0 ? Math.round(((totalPres / totalHeld) * 100) * 10) / 10 : 0;
+        }
 
-        if (existingAtt) {
-          await db.run(`
-            UPDATE attendance_records SET
-              total_sessions = 1,
+        // CRITICAL FIX: Upsert student record FIRST so Foreign Key constraints are satisfied before child attendance/assignment records
+        const existingStudent = existingStudentsMap.get(cuId);
+        if (existingStudent) {
+          await tx.run(`
+            UPDATE students SET
+              student_name = ?,
+              roll_number = COALESCE(?, roll_number),
+              father_name = COALESCE(?, father_name),
+              course = COALESCE(?, course),
+              branch = COALESCE(?, branch),
+              semester = COALESCE(?, semester),
+              section = COALESCE(?, section),
+              email = COALESCE(?, email),
+              phone = COALESCE(?, phone),
+              password_hash = COALESCE(password_hash, ?),
+              overall_percentage = ?,
+              total_sessions = ?,
               present_sessions = ?,
               absent_sessions = ?,
-              assignments_uploaded = ?,
-              import_job_id = ?,
-              attendance_percentage = ?,
-              status = ?
-            WHERE id = ?
-          `, [presentCount, absentCount, numUploaded, jobId, pct, status, existingAtt.id]);
+              import_job_id = COALESCE(?, import_job_id),
+              last_updated = ?
+            WHERE cu_id = ?
+          `, [
+            studentName,
+            mapped.roll_number || null,
+            mapped.father_name || null,
+            mapped.course || null,
+            mapped.branch || mapped.course || null,
+            mapped.semester || null,
+            mapped.section || null,
+            mapped.email || null,
+            mapped.phone || null,
+            studentPasswordHash,
+            finalPercentage,
+            totalHeld,
+            totalPres,
+            totalAbs,
+            jobId,
+            now,
+            cuId
+          ]);
         } else {
-          await db.run(`
+          await tx.run(`
+            INSERT INTO students (
+              cu_id, student_name, roll_number, father_name, course, branch, semester, section,
+              email, phone, password_hash, overall_percentage, total_sessions, present_sessions,
+              absent_sessions, import_job_id, last_updated
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            cuId,
+            studentName,
+            mapped.roll_number || cuId,
+            mapped.father_name || '',
+            mapped.course || 'B.Tech',
+            mapped.branch || mapped.course || 'General',
+            mapped.semester || '1',
+            mapped.section || 'A',
+            mapped.email || `${cuId.toLowerCase()}@college.edu`,
+            mapped.phone || '',
+            studentPasswordHash,
+            finalPercentage,
+            totalHeld,
+            totalPres,
+            totalAbs,
+            jobId,
+            now
+          ]);
+          existingStudentsMap.set(cuId, { cu_id: cuId });
+        }
+        studentsUpdated++;
+
+        // CRITICAL FIX: Upsert date attendance and assignment records AFTER parent student exists
+        for (const entry of parsedDateEntries) {
+          const { dateKey, formattedDate, isPresent, numUploaded, presentCount, absentCount, status, pct } = entry;
+          const attKey = `${cuId}#${formattedDate}`;
+          const existingAttId = existingAttMap.get(attKey);
+
+          if (existingAttId) {
+            await tx.run(`
+              UPDATE attendance_records SET
+                total_sessions = 1,
+                present_sessions = ?,
+                absent_sessions = ?,
+                assignments_uploaded = ?,
+                import_job_id = ?,
+                attendance_percentage = ?,
+                status = ?
+              WHERE id = ?
+            `, [presentCount, absentCount, numUploaded, jobId, pct, status, existingAttId]);
+          } else {
+            const newAttId = uuidv4();
+            await tx.run(`
+              INSERT INTO attendance_records (
+                id, cu_id, attendance_date, subject, total_sessions, present_sessions,
+                absent_sessions, assignments_uploaded, import_job_id, attendance_percentage, status, created_at
+              ) VALUES (?, ?, ?, 'Special Class', 1, ?, ?, ?, ?, ?, ?, ?)
+            `, [newAttId, cuId, formattedDate, presentCount, absentCount, numUploaded, jobId, pct, status, now]);
+            existingAttMap.set(attKey, newAttId);
+          }
+          attendanceUpdated++;
+
+          // Upsert assignment record for this special exam date
+          const cleanDateId = formattedDate.replace(/[^a-zA-Z0-9]/g, '-');
+          const assignId = `ASN-${cleanDateId}`;
+          const displayDate = this.formatDisplayDate(formattedDate) || dateKey;
+          const assignTitle = `Special Exam Assignment (${displayDate})`;
+          const assignStatus = isPresent ? 'Submitted' : 'Pending';
+          const submissionDate = isPresent ? formattedDate : null;
+          const remarks = isPresent
+            ? `Uploaded ${numUploaded} assignment(s) on special day`
+            : 'Assignment not uploaded / absent on special day';
+
+          const assignLookup1 = `${cuId}#${assignId}`;
+          const assignLookup2 = `${cuId}#${formattedDate}`;
+          const existingAssignId = existingAssignMap.get(assignLookup1) || existingAssignMap.get(assignLookup2);
+
+          if (existingAssignId) {
+            await tx.run(`
+              UPDATE assignments SET
+                assignment_name = ?,
+                subject = 'Special Class',
+                submission_deadline = ?,
+                submission_status = ?,
+                submission_date = ?,
+                remarks = ?,
+                import_job_id = ?
+              WHERE id = ?
+            `, [assignTitle, formattedDate, assignStatus, submissionDate, remarks, jobId, existingAssignId]);
+          } else {
+            const newAssignId = uuidv4();
+            await tx.run(`
+              INSERT INTO assignments (
+                id, assignment_id, cu_id, assignment_name, subject, submission_deadline,
+                submission_status, submission_date, remarks, import_job_id, created_at
+              ) VALUES (?, ?, ?, ?, 'Special Class', ?, ?, ?, ?, ?, ?)
+            `, [newAssignId, assignId, cuId, assignTitle, formattedDate, assignStatus, submissionDate, remarks, jobId, now]);
+            existingAssignMap.set(assignLookup1, newAssignId);
+            existingAssignMap.set(assignLookup2, newAssignId);
+          }
+          assignmentsUpdated++;
+        }
+      }
+
+      // 2. Process Separate Attendance Sheet (if provided)
+      for (let i = 0; i < attendanceRows.length; i++) {
+        const raw = attendanceRows[i];
+        const mapped = this.mapRowFields(raw, [
+          'cu_id', 'roll_number', 'attendance_date', 'subject', 'total_sessions',
+          'present_sessions', 'absent_sessions', 'attendance_percentage', 'status'
+        ]);
+
+        const cuId = (mapped.cu_id || mapped.roll_number) ? String(mapped.cu_id || mapped.roll_number).trim().toUpperCase() : null;
+        const date = this.formatDate(mapped.attendance_date);
+        const subject = mapped.subject ? String(mapped.subject).trim() : 'Special Class';
+
+        if (!cuId) {
+          errors.push({
+            sheet_name: 'Attendance',
+            row_number: i + 2,
+            cu_id: null,
+            error_message: 'Missing mandatory CU_ID in attendance record',
+            raw_data: JSON.stringify(raw),
+          });
+          continue;
+        }
+
+        if (!date) {
+          errors.push({
+            sheet_name: 'Attendance',
+            row_number: i + 2,
+            cu_id: cuId,
+            error_message: 'Invalid or missing Attendance_Date',
+            raw_data: JSON.stringify(raw),
+          });
+          continue;
+        }
+
+        let total = parseInt(mapped.total_sessions, 10);
+        let present = parseInt(mapped.present_sessions, 10);
+        let absent = parseInt(mapped.absent_sessions, 10);
+
+        if (isNaN(total) || total < 1) total = 1;
+        if (isNaN(present)) present = isNaN(absent) ? total : Math.max(0, total - absent);
+        if (isNaN(absent)) absent = Math.max(0, total - present);
+
+        const calculatedPct = total > 0 ? Math.round(((present / total) * 100) * 10) / 10 : 0;
+        let pct = parseFloat(mapped.attendance_percentage);
+        if (isNaN(pct) || pct < 0 || pct > 100) {
+          pct = calculatedPct;
+        }
+
+        let status = mapped.status ? String(mapped.status).trim() : (present === total ? 'Present' : present === 0 ? 'Absent' : 'Partial');
+
+        affectedCuIds.add(cuId);
+
+        // Ensure student exists
+        if (!existingStudentsMap.has(cuId)) {
+          const studentPasswordHash = hashPassword(cuId);
+          await tx.run(`
+            INSERT INTO students (
+              cu_id, student_name, course, branch, semester, section, password_hash,
+              overall_percentage, total_sessions, present_sessions, absent_sessions, last_updated
+            ) VALUES (?, ?, 'Course', 'General', '1', 'A', ?, 0, 0, 0, 0, ?)
+          `, [cuId, `Student ${cuId}`, studentPasswordHash, now]);
+          existingStudentsMap.set(cuId, { cu_id: cuId });
+        }
+
+        const attKey = `${cuId}#${date}`;
+        const existingAttId = existingAttMap.get(attKey);
+
+        if (existingAttId) {
+          await tx.run(`
+            UPDATE attendance_records SET
+              total_sessions = ?,
+              present_sessions = ?,
+              absent_sessions = ?,
+              attendance_percentage = ?,
+              status = ?,
+              import_job_id = COALESCE(?, import_job_id)
+            WHERE id = ?
+          `, [total, present, absent, pct, status, jobId, existingAttId]);
+        } else {
+          const recordId = uuidv4();
+          await tx.run(`
             INSERT INTO attendance_records (
               id, cu_id, attendance_date, subject, total_sessions, present_sessions,
-              absent_sessions, assignments_uploaded, import_job_id, attendance_percentage, status, created_at
-            ) VALUES (?, ?, ?, 'Special Class', 1, ?, ?, ?, ?, ?, ?, ?)
-          `, [uuidv4(), cuId, formattedDate, presentCount, absentCount, numUploaded, jobId, pct, status, now]);
+              absent_sessions, import_job_id, attendance_percentage, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [recordId, cuId, date, subject, total, present, absent, jobId, pct, status, now]);
+          existingAttMap.set(attKey, recordId);
         }
         attendanceUpdated++;
+      }
 
-        // 2. Also Upsert assignment record for this special exam date
-        const cleanDateId = formattedDate.replace(/[^a-zA-Z0-9]/g, '-');
-        const assignId = `ASN-${cleanDateId}`;
-        const displayDate = this.formatDisplayDate(formattedDate) || dateKey;
-        const assignTitle = `Special Exam Assignment (${displayDate})`;
-        const assignStatus = isPresent ? 'Submitted' : 'Pending';
-        const submissionDate = isPresent ? formattedDate : null;
-        const remarks = isPresent
-          ? `Uploaded ${numUploaded} assignment(s) on special day`
-          : 'Assignment not uploaded / absent on special day';
+      // 3. Process Assignments Sheet (if present)
+      for (let i = 0; i < assignmentRows.length; i++) {
+        const raw = assignmentRows[i];
+        const mapped = this.mapRowFields(raw, [
+          'cu_id', 'assignment_id', 'assignment_name', 'subject', 'submission_deadline',
+          'submission_status', 'submission_date', 'remarks'
+        ]);
 
-        const existingAssign = await db.get(
-          'SELECT id FROM assignments WHERE cu_id = ? AND (assignment_id = ? OR submission_deadline = ?)',
-          [cuId, assignId, formattedDate]
-        );
+        const cuId = mapped.cu_id ? String(mapped.cu_id).trim().toUpperCase() : null;
+        const assignId = mapped.assignment_id ? String(mapped.assignment_id).trim() : `ASN-${i + 1}`;
+        const title = mapped.assignment_name ? String(mapped.assignment_name).trim() : 'Special Assignment';
+        const subject = mapped.subject ? String(mapped.subject).trim() : 'Core Subject';
+        const deadline = this.formatDate(mapped.submission_deadline) || '2026-10-31';
 
-        if (existingAssign) {
-          await db.run(`
+        if (!cuId) {
+          errors.push({
+            sheet_name: 'Assignments',
+            row_number: i + 2,
+            cu_id: null,
+            error_message: 'Missing mandatory CU_ID in assignment record',
+            raw_data: JSON.stringify(raw),
+          });
+          continue;
+        }
+
+        let status = mapped.submission_status ? String(mapped.submission_status).trim() : 'Pending';
+        const lowerStatus = status.toLowerCase();
+        if (lowerStatus.includes('submit')) status = 'Submitted';
+        else if (lowerStatus.includes('late')) status = 'Late';
+        else if (lowerStatus.includes('na') || lowerStatus.includes('not')) status = 'Not Applicable';
+        else status = 'Pending';
+
+        const submissionDate = this.formatDate(mapped.submission_date) || (status === 'Submitted' ? now.split('T')[0] : null);
+        const remarks = mapped.remarks ? String(mapped.remarks).trim() : '';
+
+        affectedCuIds.add(cuId);
+
+        // Ensure student exists
+        if (!existingStudentsMap.has(cuId)) {
+          const studentPasswordHash = hashPassword(cuId);
+          await tx.run(`
+            INSERT INTO students (
+              cu_id, student_name, course, branch, semester, section, password_hash,
+              overall_percentage, total_sessions, present_sessions, absent_sessions, last_updated
+            ) VALUES (?, ?, 'Course', 'General', '1', 'A', ?, 0, 0, 0, 0, ?)
+          `, [cuId, `Student ${cuId}`, studentPasswordHash, now]);
+          existingStudentsMap.set(cuId, { cu_id: cuId });
+        }
+
+        const assignLookup = `${cuId}#${assignId}`;
+        const existingAssignId = existingAssignMap.get(assignLookup);
+
+        if (existingAssignId) {
+          await tx.run(`
             UPDATE assignments SET
               assignment_name = ?,
-              subject = 'Special Class',
+              subject = ?,
               submission_deadline = ?,
               submission_status = ?,
               submission_date = ?,
               remarks = ?,
-              import_job_id = ?
+              import_job_id = COALESCE(?, import_job_id)
             WHERE id = ?
-          `, [assignTitle, formattedDate, assignStatus, submissionDate, remarks, jobId, existingAssign.id]);
+          `, [title, subject, deadline, status, submissionDate, remarks, jobId, existingAssignId]);
         } else {
-          await db.run(`
+          const id = uuidv4();
+          await tx.run(`
             INSERT INTO assignments (
               id, assignment_id, cu_id, assignment_name, subject, submission_deadline,
               submission_status, submission_date, remarks, import_job_id, created_at
-            ) VALUES (?, ?, ?, ?, 'Special Class', ?, ?, ?, ?, ?, ?)
-          `, [uuidv4(), assignId, cuId, assignTitle, formattedDate, assignStatus, submissionDate, remarks, jobId, now]);
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [id, assignId, cuId, title, subject, deadline, status, submissionDate, remarks, jobId, now]);
+          existingAssignMap.set(assignLookup, id);
         }
         assignmentsUpdated++;
       }
 
-      // Calculate totals: prioritize explicit columns if present; otherwise use embedded counts
-      let totalHeld = parseInt(mapped.total_sessions, 10);
-      let totalPres = parseInt(mapped.present_sessions, 10);
-      let totalAbs = parseInt(mapped.absent_sessions, 10);
-
-      if (isNaN(totalHeld) || totalHeld <= 0) {
-        totalHeld = embeddedHeldCount > 0 ? embeddedHeldCount : 0;
-      }
-      if (isNaN(totalPres)) {
-        totalPres = embeddedPresentCount;
-      }
-      if (isNaN(totalAbs)) {
-        totalAbs = Math.max(0, totalHeld - totalPres);
-      }
-
-      // Calculate percentage
-      let finalPercentage = parseFloat(mapped.attendance_percentage);
-      if (isNaN(finalPercentage) || finalPercentage <= 0) {
-        finalPercentage = totalHeld > 0 ? Math.round(((totalPres / totalHeld) * 100) * 10) / 10 : 0;
-      }
-
-      // Upsert student record
-      const existing = await db.get('SELECT * FROM students WHERE cu_id = ?', [cuId]);
-      if (existing) {
-        await db.run(`
-          UPDATE students SET
-            student_name = ?,
-            roll_number = COALESCE(?, roll_number),
-            father_name = COALESCE(?, father_name),
-            course = COALESCE(?, course),
-            branch = COALESCE(?, branch),
-            semester = COALESCE(?, semester),
-            section = COALESCE(?, section),
-            email = COALESCE(?, email),
-            phone = COALESCE(?, phone),
-            password_hash = COALESCE(password_hash, ?),
-            overall_percentage = ?,
-            total_sessions = ?,
-            present_sessions = ?,
-            absent_sessions = ?,
-            import_job_id = COALESCE(?, import_job_id),
-            last_updated = ?
-          WHERE cu_id = ?
-        `, [
-          studentName,
-          mapped.roll_number || null,
-          mapped.father_name || null,
-          mapped.course || null,
-          mapped.branch || mapped.course || null,
-          mapped.semester || null,
-          mapped.section || null,
-          mapped.email || null,
-          mapped.phone || null,
-          studentPasswordHash,
-          finalPercentage,
-          totalHeld,
-          totalPres,
-          totalAbs,
-          jobId,
-          now,
-          cuId
-        ]);
-      } else {
-        await db.run(`
-          INSERT INTO students (
-            cu_id, student_name, roll_number, father_name, course, branch, semester, section,
-            email, phone, password_hash, overall_percentage, total_sessions, present_sessions,
-            absent_sessions, import_job_id, last_updated
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          cuId,
-          studentName,
-          mapped.roll_number || cuId,
-          mapped.father_name || '',
-          mapped.course || 'B.Tech',
-          mapped.branch || mapped.course || 'General',
-          mapped.semester || '1',
-          mapped.section || 'A',
-          mapped.email || `${cuId.toLowerCase()}@college.edu`,
-          mapped.phone || '',
-          studentPasswordHash,
-          finalPercentage,
-          totalHeld,
-          totalPres,
-          totalAbs,
-          jobId,
-          now
-        ]);
-      }
-      studentsUpdated++;
-    }
-
-    // 2. Process Separate Attendance Sheet (if provided)
-    for (let i = 0; i < attendanceRows.length; i++) {
-      const raw = attendanceRows[i];
-      const mapped = this.mapRowFields(raw, [
-        'cu_id', 'roll_number', 'attendance_date', 'subject', 'total_sessions',
-        'present_sessions', 'absent_sessions', 'attendance_percentage', 'status'
+      // 4. Save Import Job Record
+      const status = errors.length === 0 ? 'success' : (studentsUpdated + attendanceUpdated + assignmentsUpdated > 0 ? 'partial' : 'failed');
+      await tx.run(`
+        INSERT INTO import_jobs (
+          id, filename, uploaded_by, import_type, status, total_rows,
+          students_updated, attendance_updated, assignments_updated, errors_count, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        jobId, filename, uploadedBy, options.type || 'admin_upload', status, totalRows,
+        studentsUpdated, attendanceUpdated, assignmentsUpdated, errors.length, now
       ]);
 
-      const cuId = (mapped.cu_id || mapped.roll_number) ? String(mapped.cu_id || mapped.roll_number).trim().toUpperCase() : null;
-      const date = this.formatDate(mapped.attendance_date);
-      const subject = mapped.subject ? String(mapped.subject).trim() : 'Special Class';
-
-      if (!cuId) {
-        errors.push({
-          sheet_name: 'Attendance',
-          row_number: i + 2,
-          cu_id: null,
-          error_message: 'Missing mandatory CU_ID in attendance record',
-          raw_data: JSON.stringify(raw),
-        });
-        continue;
+      // 5. Save Errors if any (up to 100)
+      for (const err of errors.slice(0, 100)) {
+        await tx.run(`
+          INSERT INTO import_errors (id, job_id, sheet_name, row_number, cu_id, error_message, raw_data)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [uuidv4(), jobId, err.sheet_name, err.row_number, err.cu_id, err.error_message, err.raw_data]);
       }
-
-      if (!date) {
-        errors.push({
-          sheet_name: 'Attendance',
-          row_number: i + 2,
-          cu_id: cuId,
-          error_message: 'Invalid or missing Attendance_Date',
-          raw_data: JSON.stringify(raw),
-        });
-        continue;
-      }
-
-      let total = parseInt(mapped.total_sessions, 10);
-      let present = parseInt(mapped.present_sessions, 10);
-      let absent = parseInt(mapped.absent_sessions, 10);
-
-      if (isNaN(total) || total < 1) total = 1;
-      if (isNaN(present)) present = isNaN(absent) ? total : Math.max(0, total - absent);
-      if (isNaN(absent)) absent = Math.max(0, total - present);
-
-      const calculatedPct = total > 0 ? Math.round(((present / total) * 100) * 10) / 10 : 0;
-      let pct = parseFloat(mapped.attendance_percentage);
-      if (isNaN(pct) || pct < 0 || pct > 100) {
-        pct = calculatedPct;
-      }
-
-      let status = mapped.status ? String(mapped.status).trim() : (present === total ? 'Present' : present === 0 ? 'Absent' : 'Partial');
-
-      affectedCuIds.add(cuId);
-
-      // Check student existence
-      const studentExists = await db.get('SELECT cu_id FROM students WHERE cu_id = ?', [cuId]);
-      if (!studentExists) {
-        const studentPasswordHash = hashPassword(cuId);
-        await db.run(`
-          INSERT INTO students (
-            cu_id, student_name, course, branch, semester, section, password_hash,
-            overall_percentage, total_sessions, present_sessions, absent_sessions, last_updated
-          ) VALUES (?, ?, 'Course', 'General', '1', 'A', ?, 0, 0, 0, 0, ?)
-        `, [cuId, `Student ${cuId}`, studentPasswordHash, now]);
-      }
-
-      // Check existing record for idempotency
-      const existingRecord = await db.get(
-        'SELECT id FROM attendance_records WHERE cu_id = ? AND attendance_date = ? AND subject = ?',
-        [cuId, date, subject]
-      );
-
-      if (existingRecord) {
-        await db.run(`
-          UPDATE attendance_records SET
-            total_sessions = ?,
-            present_sessions = ?,
-            absent_sessions = ?,
-            attendance_percentage = ?,
-            status = ?,
-            import_job_id = COALESCE(?, import_job_id)
-          WHERE id = ?
-        `, [total, present, absent, pct, status, jobId, existingRecord.id]);
-      } else {
-        const recordId = uuidv4();
-        await db.run(`
-          INSERT INTO attendance_records (
-            id, cu_id, attendance_date, subject, total_sessions, present_sessions,
-            absent_sessions, import_job_id, attendance_percentage, status, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [recordId, cuId, date, subject, total, present, absent, jobId, pct, status, now]);
-      }
-      attendanceUpdated++;
-    }
-
-    // 3. Process Assignments Sheet (if present)
-    for (let i = 0; i < assignmentRows.length; i++) {
-      const raw = assignmentRows[i];
-      const mapped = this.mapRowFields(raw, [
-        'cu_id', 'assignment_id', 'assignment_name', 'subject', 'submission_deadline',
-        'submission_status', 'submission_date', 'remarks'
-      ]);
-
-      const cuId = mapped.cu_id ? String(mapped.cu_id).trim().toUpperCase() : null;
-      const assignId = mapped.assignment_id ? String(mapped.assignment_id).trim() : `ASN-${i + 1}`;
-      const title = mapped.assignment_name ? String(mapped.assignment_name).trim() : 'Special Assignment';
-      const subject = mapped.subject ? String(mapped.subject).trim() : 'Core Subject';
-      const deadline = this.formatDate(mapped.submission_deadline) || '2026-10-31';
-
-      if (!cuId) {
-        errors.push({
-          sheet_name: 'Assignments',
-          row_number: i + 2,
-          cu_id: null,
-          error_message: 'Missing mandatory CU_ID in assignment record',
-          raw_data: JSON.stringify(raw),
-        });
-        continue;
-      }
-
-      let status = mapped.submission_status ? String(mapped.submission_status).trim() : 'Pending';
-      const lowerStatus = status.toLowerCase();
-      if (lowerStatus.includes('submit')) status = 'Submitted';
-      else if (lowerStatus.includes('late')) status = 'Late';
-      else if (lowerStatus.includes('na') || lowerStatus.includes('not')) status = 'Not Applicable';
-      else status = 'Pending';
-
-      const submissionDate = this.formatDate(mapped.submission_date) || (status === 'Submitted' ? now.split('T')[0] : null);
-      const remarks = mapped.remarks ? String(mapped.remarks).trim() : '';
-
-      affectedCuIds.add(cuId);
-
-      // Verify student existence
-      const studentExists = await db.get('SELECT cu_id FROM students WHERE cu_id = ?', [cuId]);
-      if (!studentExists) {
-        const studentPasswordHash = hashPassword(cuId);
-        await db.run(`
-          INSERT INTO students (
-            cu_id, student_name, course, branch, semester, section, password_hash,
-            overall_percentage, total_sessions, present_sessions, absent_sessions, last_updated
-          ) VALUES (?, ?, 'Course', 'General', '1', 'A', ?, 0, 0, 0, 0, ?)
-        `, [cuId, `Student ${cuId}`, studentPasswordHash, now]);
-      }
-
-      const existingAssign = await db.get(
-        'SELECT id FROM assignments WHERE cu_id = ? AND assignment_id = ?',
-        [cuId, assignId]
-      );
-
-      if (existingAssign) {
-        await db.run(`
-          UPDATE assignments SET
-            assignment_name = ?,
-            subject = ?,
-            submission_deadline = ?,
-            submission_status = ?,
-            submission_date = ?,
-            remarks = ?,
-            import_job_id = COALESCE(?, import_job_id)
-          WHERE id = ?
-        `, [title, subject, deadline, status, submissionDate, remarks, jobId, existingAssign.id]);
-      } else {
-        const id = uuidv4();
-        await db.run(`
-          INSERT INTO assignments (
-            id, assignment_id, cu_id, assignment_name, subject, submission_deadline,
-            submission_status, submission_date, remarks, import_job_id, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [id, assignId, cuId, title, subject, deadline, status, submissionDate, remarks, jobId, now]);
-      }
-      assignmentsUpdated++;
-    }
-
-    // 4. Save Import Job Record
-    const status = errors.length === 0 ? 'success' : (studentsUpdated + attendanceUpdated + assignmentsUpdated > 0 ? 'partial' : 'failed');
-    await db.run(`
-      INSERT INTO import_jobs (
-        id, filename, uploaded_by, import_type, status, total_rows,
-        students_updated, attendance_updated, assignments_updated, errors_count, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      jobId, filename, uploadedBy, options.type || 'admin_upload', status, totalRows,
-      studentsUpdated, attendanceUpdated, assignmentsUpdated, errors.length, now
-    ]);
-
-    // 5. Save Errors if any
-    for (const err of errors) {
-      await db.run(`
-        INSERT INTO import_errors (id, job_id, sheet_name, row_number, cu_id, error_message, raw_data)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `, [uuidv4(), jobId, err.sheet_name, err.row_number, err.cu_id, err.error_message, err.raw_data]);
-    }
 
       return {
         jobId,
         status,
+        timestamp: now,
         filename,
         totalRows,
         studentsUpdated,
@@ -831,9 +864,7 @@ export class ExcelProcessor {
         errors: errors.slice(0, 50),
         affectedStudents: Array.from(affectedCuIds),
       };
-    } finally {
-      db.endBatch();
-    }
+    });
   }
 
   // Generate official downloadable Excel Template (.xlsx) matching user columns

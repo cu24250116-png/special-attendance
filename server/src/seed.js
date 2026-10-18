@@ -57,60 +57,105 @@ export async function seedDatabase() {
   // Remove any legacy admin placeholder
   await db.run('DELETE FROM users WHERE LOWER(email) = ?', ['admin@college.edu']);
 
-  // 2. Auto-seed student dataset into database if empty or missing
+  // 2. Auto-seed student dataset into database if empty or missing (< 100 students)
   const studentCount = await db.get('SELECT COUNT(*) as count FROM students');
   const count = studentCount ? Number(studentCount.count) : 0;
   if (count < 100) {
     const seedFile = path.join(__dirname, '..', 'data', 'master_seed.json');
     if (fs.existsSync(seedFile)) {
-      console.log(`Database has only ${count} students. Seeding 1,367 official students from master_seed.json...`);
+      console.log(`Database has only ${count} students. Fast batch-seeding 1,367 official students from master_seed.json...`);
       const seedData = JSON.parse(fs.readFileSync(seedFile, 'utf8'));
 
-      db.startBatch();
-      for (const s of (seedData.students || [])) {
-        await db.run(`
-          INSERT INTO students (
-            cu_id, student_name, roll_number, father_name, course, branch,
-            semester, section, email, phone, password_hash, overall_percentage,
-            total_sessions, present_sessions, absent_sessions, last_updated,
-            import_job_id, password_changed
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          s.cu_id, s.student_name, s.roll_number, s.father_name, s.course, s.branch,
-          s.semester, s.section, s.email, s.phone, s.password_hash, s.overall_percentage,
-          s.total_sessions, s.present_sessions, s.absent_sessions, s.last_updated,
-          s.import_job_id, s.password_changed || 0
-        ]);
-      }
+      await db.transaction(async (tx) => {
+        // A. Batch insert students (chunks of 100)
+        const studentsList = seedData.students || [];
+        const studentChunkSize = 100;
+        for (let i = 0; i < studentsList.length; i += studentChunkSize) {
+          const chunk = studentsList.slice(i, i + studentChunkSize);
+          const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+          const params = [];
+          for (const s of chunk) {
+            params.push(
+              s.cu_id, s.student_name, s.roll_number || s.cu_id, s.father_name || '',
+              s.course || 'B.Tech', s.branch || s.course || 'General', s.semester || '1',
+              s.section || 'A', s.email || `${s.cu_id.toLowerCase()}@college.edu`, s.phone || '',
+              s.password_hash, s.overall_percentage || 0, s.total_sessions || 0,
+              s.present_sessions || 0, s.absent_sessions || 0, s.last_updated || now,
+              s.import_job_id || null, s.password_changed || 0
+            );
+          }
+          const sql = tx.isPg
+            ? `INSERT INTO students (
+                 cu_id, student_name, roll_number, father_name, course, branch,
+                 semester, section, email, phone, password_hash, overall_percentage,
+                 total_sessions, present_sessions, absent_sessions, last_updated,
+                 import_job_id, password_changed
+               ) VALUES ${placeholders} ON CONFLICT (cu_id) DO NOTHING`
+            : `INSERT OR IGNORE INTO students (
+                 cu_id, student_name, roll_number, father_name, course, branch,
+                 semester, section, email, phone, password_hash, overall_percentage,
+                 total_sessions, present_sessions, absent_sessions, last_updated,
+                 import_job_id, password_changed
+               ) VALUES ${placeholders}`;
+          await tx.run(sql, params);
+        }
 
-      for (const a of (seedData.attendance || [])) {
-        await db.run(`
-          INSERT INTO attendance_records (
-            id, cu_id, attendance_date, subject, total_sessions, present_sessions,
-            absent_sessions, attendance_percentage, status, created_at,
-            assignments_uploaded, import_job_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          a.id, a.cu_id, a.attendance_date, a.subject || 'Special Class',
-          a.total_sessions || 1, a.present_sessions || 1, a.absent_sessions || 0,
-          a.attendance_percentage || 100, a.status, a.created_at,
-          a.assignments_uploaded || 0, a.import_job_id || null
-        ]);
-      }
+        // B. Batch insert attendance records (chunks of 150)
+        const attendanceList = seedData.attendance || [];
+        const attChunkSize = 150;
+        for (let i = 0; i < attendanceList.length; i += attChunkSize) {
+          const chunk = attendanceList.slice(i, i + attChunkSize);
+          const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+          const params = [];
+          for (const a of chunk) {
+            params.push(
+              a.id || uuidv4(), a.cu_id, a.attendance_date, a.subject || 'Special Class',
+              a.total_sessions || 1, a.present_sessions || 1, a.absent_sessions || 0,
+              a.assignments_uploaded || 0, a.import_job_id || null,
+              a.attendance_percentage || 100, a.status || 'Present', a.created_at || now
+            );
+          }
+          const sql = tx.isPg
+            ? `INSERT INTO attendance_records (
+                 id, cu_id, attendance_date, subject, total_sessions, present_sessions,
+                 absent_sessions, assignments_uploaded, import_job_id,
+                 attendance_percentage, status, created_at
+               ) VALUES ${placeholders} ON CONFLICT (id) DO NOTHING`
+            : `INSERT OR IGNORE INTO attendance_records (
+                 id, cu_id, attendance_date, subject, total_sessions, present_sessions,
+                 absent_sessions, assignments_uploaded, import_job_id,
+                 attendance_percentage, status, created_at
+               ) VALUES ${placeholders}`;
+          await tx.run(sql, params);
+        }
 
-      for (const as of (seedData.assignments || [])) {
-        await db.run(`
-          INSERT INTO assignments (
-            id, assignment_id, cu_id, assignment_name, subject, submission_deadline,
-            submission_status, submission_date, remarks, created_at, import_job_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          as.id, as.assignment_id, as.cu_id, as.assignment_name, as.subject || 'Special Class',
-          as.submission_deadline, as.submission_status, as.submission_date, as.remarks,
-          as.created_at, as.import_job_id
-        ]);
-      }
-      db.endBatch();
+        // C. Batch insert assignments (chunks of 150)
+        const assignList = seedData.assignments || [];
+        const assignChunkSize = 150;
+        for (let i = 0; i < assignList.length; i += assignChunkSize) {
+          const chunk = assignList.slice(i, i + assignChunkSize);
+          const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+          const params = [];
+          for (const as of chunk) {
+            params.push(
+              as.id || uuidv4(), as.assignment_id, as.cu_id, as.assignment_name || 'Special Assignment',
+              as.subject || 'Special Class', as.submission_deadline || '2026-10-31',
+              as.submission_status || 'Pending', as.submission_date || null,
+              as.remarks || '', as.import_job_id || null, as.created_at || now
+            );
+          }
+          const sql = tx.isPg
+            ? `INSERT INTO assignments (
+                 id, assignment_id, cu_id, assignment_name, subject, submission_deadline,
+                 submission_status, submission_date, remarks, import_job_id, created_at
+               ) VALUES ${placeholders} ON CONFLICT (id) DO NOTHING`
+            : `INSERT OR IGNORE INTO assignments (
+                 id, assignment_id, cu_id, assignment_name, subject, submission_deadline,
+                 submission_status, submission_date, remarks, import_job_id, created_at
+               ) VALUES ${placeholders}`;
+          await tx.run(sql, params);
+        }
+      });
       console.log(`Database successfully populated with ${seedData.students?.length || 0} students and attendance history.`);
     }
   } else {

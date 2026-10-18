@@ -94,8 +94,9 @@ export function App() {
         eventSource.addEventListener('college_data_updated', (event) => {
           try {
             const data = JSON.parse(event.data);
-            const time = new Date().toLocaleTimeString();
-            setLastSyncNotice(`Latest Excel records synchronized from college server at ${time}`);
+            const time = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+            setLastSyncNotice(`Latest Excel records synchronized from college server at ${time} IST`);
+            window.dispatchEvent(new CustomEvent('college_data_updated', { detail: data }));
             if (studentCuId) {
               fetchCurrentStudent();
             }

@@ -269,10 +269,12 @@ class DatabaseService {
           email VARCHAR(255),
           phone VARCHAR(50),
           password_hash VARCHAR(255),
+          password_changed INTEGER DEFAULT 0,
           overall_percentage DOUBLE PRECISION DEFAULT 0,
           total_sessions INTEGER DEFAULT 0,
           present_sessions INTEGER DEFAULT 0,
           absent_sessions INTEGER DEFAULT 0,
+          import_job_id VARCHAR(64),
           last_updated TIMESTAMPTZ NOT NULL
         );
 
@@ -284,6 +286,8 @@ class DatabaseService {
           total_sessions INTEGER NOT NULL DEFAULT 1,
           present_sessions INTEGER NOT NULL DEFAULT 1,
           absent_sessions INTEGER NOT NULL DEFAULT 0,
+          assignments_uploaded INTEGER DEFAULT 0,
+          import_job_id VARCHAR(64),
           attendance_percentage DOUBLE PRECISION NOT NULL DEFAULT 100,
           status VARCHAR(50) NOT NULL DEFAULT 'Present',
           created_at TIMESTAMPTZ NOT NULL
@@ -299,6 +303,7 @@ class DatabaseService {
           submission_status VARCHAR(50) NOT NULL DEFAULT 'Pending',
           submission_date VARCHAR(50),
           remarks TEXT,
+          import_job_id VARCHAR(64),
           created_at TIMESTAMPTZ NOT NULL
         );
 
@@ -367,15 +372,25 @@ class DatabaseService {
         CREATE INDEX IF NOT EXISTS idx_admin_messages_target ON admin_messages(target_type, target_value);
       `);
 
-      try { await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR(100) DEFAULT 'ALL'"); } catch(e) {}
-      try { await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active'"); } catch(e) {}
-      try { await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER DEFAULT 0"); } catch(e) {}
-      try { await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)"); } catch(e) {}
-      try { await client.query("ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS assignments_uploaded INTEGER DEFAULT 0"); } catch(e) {}
-      try { await client.query("ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS import_job_id VARCHAR(64)"); } catch(e) {}
-      try { await client.query("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS import_job_id VARCHAR(64)"); } catch(e) {}
-      try { await client.query("ALTER TABLE students ADD COLUMN IF NOT EXISTS import_job_id VARCHAR(64)"); } catch(e) {}
-      try { await client.query("ALTER TABLE students ADD COLUMN IF NOT EXISTS password_changed INTEGER DEFAULT 0"); } catch(e) {}
+      // Ensure every column exists on previously created PostgreSQL tables
+      const migrations = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR(100) DEFAULT 'ALL'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)",
+        "ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS assignments_uploaded INTEGER DEFAULT 0",
+        "ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS import_job_id VARCHAR(64)",
+        "ALTER TABLE assignments ADD COLUMN IF NOT EXISTS import_job_id VARCHAR(64)",
+        "ALTER TABLE students ADD COLUMN IF NOT EXISTS import_job_id VARCHAR(64)",
+        "ALTER TABLE students ADD COLUMN IF NOT EXISTS password_changed INTEGER DEFAULT 0",
+      ];
+      for (const sql of migrations) {
+        try {
+          await client.query(sql);
+        } catch (err) {
+          console.warn(`Migration notice for '${sql}':`, err.message);
+        }
+      }
     } finally {
       client.release();
     }
@@ -433,9 +448,30 @@ class DatabaseService {
     await this.init();
     if (this.isPg) {
       const client = await this.pgPool.connect();
+      const tx = {
+        isPg: true,
+        query: async (sql, params = []) => {
+          const pgSql = this.formatPgSql(sql);
+          const result = await client.query(pgSql, params);
+          return result.rows;
+        },
+        get: async (sql, params = []) => {
+          const rows = await tx.query(sql, params);
+          return rows.length > 0 ? rows[0] : null;
+        },
+        all: async (sql, params = []) => {
+          return tx.query(sql, params);
+        },
+        run: async (sql, params = []) => {
+          const pgSql = this.formatPgSql(sql);
+          const result = await client.query(pgSql, params);
+          return { changes: result.rowCount };
+        },
+      };
+
       try {
         await client.query('BEGIN');
-        const res = await fn(this);
+        const res = await fn(tx);
         await client.query('COMMIT');
         return res;
       } catch (err) {
@@ -445,10 +481,21 @@ class DatabaseService {
         client.release();
       }
     } else {
+      const tx = {
+        isPg: false,
+        query: async (sql, params = []) => this.query(sql, params),
+        get: async (sql, params = []) => this.get(sql, params),
+        all: async (sql, params = []) => this.all(sql, params),
+        run: async (sql, params = []) => {
+          this.sqliteDb.run(sql, params);
+          return { changes: 1 };
+        },
+      };
+
       try {
         this.startBatch();
         this.sqliteDb.run('BEGIN TRANSACTION;');
-        const res = await fn(this);
+        const res = await fn(tx);
         this.sqliteDb.run('COMMIT;');
         this.endBatch();
         return res;

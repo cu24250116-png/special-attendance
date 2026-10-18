@@ -1,14 +1,13 @@
 import { Student, AttendanceRecord, DailyAttendanceSummary, Assignment, AdminAnalytics, ImportJob, CloudSyncConfig, SpecialClassAttendance, AdminMessage, AdminUser } from '../types';
-import bundledDataRaw from '../data/bundledAttendanceData.json';
 
-const bundledData = bundledDataRaw as unknown as {
-  exportedAt: string;
-  totalStudents: number;
-  students: Record<string, {
+const bundledData = {
+  exportedAt: '',
+  totalStudents: 0,
+  students: {} as Record<string, {
     profile: Student;
     attendance: any;
     assignments: any;
-  }>;
+  }>,
 };
 
 // Official 24/7 Production Cloud Endpoint on Render
@@ -153,6 +152,11 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers.set('Authorization', `Bearer ${token}`);
   }
 
+  // Enforce fresh network fetch: bypass Android WebView and browser caches
+  headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  headers.set('Pragma', 'no-cache');
+  headers.set('Expires', '0');
+
   const customUrl = localStorage.getItem('college_custom_api_url') || localStorage.getItem('custom_api_url');
   const isNative = isNativeApp();
 
@@ -172,8 +176,16 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   const timeoutMs = isHeavyOp ? 180000 : (isNative ? 15000 : 30000);
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+  // Append cache-busting timestamp on GET requests to prevent any HTTP client caching
+  const method = (options.method || 'GET').toUpperCase();
+  let fullEndpoint = endpoint;
+  if (method === 'GET') {
+    const separator = fullEndpoint.includes('?') ? '&' : '?';
+    fullEndpoint = `${fullEndpoint}${separator}_t=${Date.now()}`;
+  }
+
   try {
-    const response = await fetch(`${base}${endpoint}`, {
+    const response = await fetch(`${base}${fullEndpoint}`, {
       ...options,
       headers,
       signal: controller.signal,
@@ -192,9 +204,11 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
     const data = await response.json();
 
-    // Cache successful responses for offline access
-    const cacheKey = endpoint.replace(/^\/+/, '').replace(/[^a-zA-Z0-9_]/g, '_');
-    saveToOfflineCache(cacheKey, data);
+    // Cache successful responses for offline access only for non-attendance endpoints
+    if (!endpoint.includes('attendance') && !endpoint.includes('students/')) {
+      const cacheKey = endpoint.replace(/^\/+/, '').replace(/[^a-zA-Z0-9_]/g, '_');
+      saveToOfflineCache(cacheKey, data);
+    }
 
     return data;
   } catch (networkError: any) {

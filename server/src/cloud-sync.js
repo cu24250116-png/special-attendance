@@ -31,7 +31,7 @@ class CloudSyncService {
   async getStatus() {
     const config = await db.get('SELECT * FROM cloud_sync_configurations LIMIT 1');
     const lastJob = await db.get(
-      'SELECT * FROM import_jobs WHERE import_type = "cloud_sync" ORDER BY created_at DESC LIMIT 1'
+      "SELECT * FROM import_jobs WHERE import_type = 'cloud_sync' ORDER BY created_at DESC LIMIT 1"
     );
     return {
       config: config || {
@@ -79,7 +79,7 @@ class CloudSyncService {
     const now = new Date().toISOString();
 
     try {
-      await db.run('UPDATE cloud_sync_configurations SET status = "syncing" WHERE id = (SELECT id FROM cloud_sync_configurations LIMIT 1)');
+      await db.run("UPDATE cloud_sync_configurations SET status = 'syncing' WHERE id = (SELECT id FROM cloud_sync_configurations LIMIT 1)");
 
       // Generate a mock master workbook if no external API keys are configured,
       // simulating a live Google Drive / OneDrive pull of the master spreadsheet

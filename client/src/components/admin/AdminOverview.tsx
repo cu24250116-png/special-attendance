@@ -337,7 +337,7 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({ onNavigateTab, cur
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        By {job.uploaded_by} • {new Date(job.created_at).toLocaleString()}
+                        By {job.uploaded_by} • {new Date(job.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST
                       </p>
                     </div>
 

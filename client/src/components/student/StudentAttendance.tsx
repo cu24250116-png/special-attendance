@@ -56,7 +56,14 @@ export const StudentAttendance: React.FC<StudentAttendanceProps> = ({ cuId, stud
 
   useEffect(() => {
     fetchAttendance();
-  }, [cuId]);
+    const handleUpdate = () => {
+      fetchAttendance();
+    };
+    window.addEventListener('college_data_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('college_data_updated', handleUpdate);
+    };
+  }, [cuId, student?.last_updated]);
 
   const getStatusBadge = (status: string, percentage: number, assignmentsUploaded?: number) => {
     const isUploaded = (assignmentsUploaded !== undefined && assignmentsUploaded > 0) || status === 'Present' || percentage === 100;

@@ -38,6 +38,15 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Enforce no-cache on all API routes to prevent stale client, WebView, or proxy responses
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
+
 // Multer memory storage for Excel files
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -59,13 +68,46 @@ app.get('/api/realtime/stream', (req, res) => {
   realtimeHub.addClient(req, res, { cuId, role });
 });
 
-// Health check
-app.get('/api/health', (req, res) => {
+// Health check with database readiness and student record count
+app.get('/api/health', async (req, res) => {
+  let dbStatus = 'ok';
+  let totalStudents = 0;
+  try {
+    const row = await db.get('SELECT COUNT(*) as count FROM students');
+    totalStudents = parseInt(row?.count || 0, 10);
+  } catch (e) {
+    dbStatus = e.message;
+  }
   res.json({
     status: 'online',
     timestamp: new Date().toISOString(),
+    database: {
+      type: db.isPg ? 'postgresql' : 'sqlite',
+      status: dbStatus,
+      totalStudents,
+    },
     realtimeClients: realtimeHub.getClientStats(),
   });
+});
+
+// System sync status with latest import job information
+app.get('/api/system/sync-status', async (req, res) => {
+  try {
+    const latestImport = await db.get(
+      'SELECT id, filename, created_at, status, students_updated, records_updated FROM import_jobs ORDER BY created_at DESC LIMIT 1'
+    );
+    const studentCountRow = await db.get('SELECT COUNT(*) as count FROM students');
+    const recordCountRow = await db.get('SELECT COUNT(*) as count FROM attendance_records');
+    res.json({
+      latestImport: latestImport || null,
+      totalStudents: parseInt(studentCountRow?.count || 0, 10),
+      totalRecords: parseInt(recordCountRow?.count || 0, 10),
+      serverTime: new Date().toISOString(),
+      serverTimeIST: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ==========================================
@@ -761,11 +803,17 @@ app.get('/api/students/:cu_id', requireStudentOrAdmin, async (req, res) => {
   const assignments = await db.all('SELECT * FROM assignments WHERE cu_id = ?', [cuId]);
   const specialClassAttendance = computeSpecialClassAttendance(cuId, allRecords, assignments);
 
+  const latestImport = await db.get(
+    'SELECT id, filename, created_at, status FROM import_jobs ORDER BY created_at DESC LIMIT 1'
+  );
+
   res.json({
     student: {
       ...student,
       special_class_attendance: specialClassAttendance,
-    }
+    },
+    latestImport: latestImport || null,
+    serverTime: new Date().toISOString(),
   });
 });
 
@@ -854,6 +902,10 @@ app.get('/api/students/:cu_id/attendance', requireStudentOrAdmin, async (req, re
   const latestFiveDates = allUniqueDates.slice(0, 5);
   const lastFiveDaysRecords = allRecords.filter(r => latestFiveDates.includes(r.attendance_date));
 
+  const latestImport = await db.get(
+    'SELECT id, filename, created_at, status FROM import_jobs ORDER BY created_at DESC LIMIT 1'
+  );
+
   res.json({
     latestFiveDates,
     dailySummaries,
@@ -861,6 +913,9 @@ app.get('/api/students/:cu_id/attendance', requireStudentOrAdmin, async (req, re
     totalRecords: allRecords.length,
     hasRecords: allRecords.length > 0 || specialClassAttendance.totalSpecialDates > 0,
     specialClassAttendance,
+    latestImport: latestImport || null,
+    lastUpdated: latestImport?.created_at || student.last_updated || new Date().toISOString(),
+    serverTime: new Date().toISOString(),
   });
 });
 
@@ -1234,16 +1289,6 @@ app.post('/api/admin/excel/import', requireAdmin, upload.single('file'), async (
       updatedBy: adminName,
       result,
     });
-
-    // Automatically keep bundled offline database in sync with newest dataset
-    try {
-      const { spawn } = await import('child_process');
-      const exportScript = path.join(__dirname, '..', 'scripts', 'export-bundled-data.js');
-      const exportProc = spawn(process.execPath, [exportScript], { stdio: 'ignore' });
-      exportProc.unref();
-    } catch (exportErr) {
-      console.warn('Could not trigger background bundle export:', exportErr);
-    }
 
     res.json({
       success: true,

@@ -59,6 +59,13 @@ export const StudentAssignments: React.FC<StudentAssignmentsProps> = ({ cuId }) 
 
   useEffect(() => {
     fetchAssignments();
+    const handleUpdate = () => {
+      fetchAssignments();
+    };
+    window.addEventListener('college_data_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('college_data_updated', handleUpdate);
+    };
   }, [cuId]);
 
   const totalSpecial = specialAttendance?.totalSpecialDates || stats.totalSpecialAssignments || 8;

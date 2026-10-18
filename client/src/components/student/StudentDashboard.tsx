@@ -42,6 +42,13 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
     student.special_class_attendance || null
   );
 
+  // Synchronize specialAttendance whenever student prop updates from SSE or parent re-fetch
+  useEffect(() => {
+    if (student.special_class_attendance) {
+      setSpecialAttendance(student.special_class_attendance);
+    }
+  }, [student.special_class_attendance, student.last_updated]);
+
   // Admin / HOD Broadcast Messages State
   const [messages, setMessages] = useState<AdminMessage[]>([]);
   const [seenNoticeIds, setSeenNoticeIds] = useState<string[]>(() => {
@@ -93,7 +100,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       mounted = false;
       window.removeEventListener('college_admin_message', handleLiveNotice);
     };
-  }, [student.cu_id, student.branch, student.course, lastSyncNotice]);
+  }, [student.cu_id, student.branch, student.course, student.last_updated, lastSyncNotice]);
 
   const unreadNotices = messages.filter(m => !seenNoticeIds.includes(m.id));
   const currentNotice = unreadNotices[activeNoticeIdx] || unreadNotices[0];
@@ -159,14 +166,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   };
 
   const formattedDate = student.last_updated
-    ? new Date(student.last_updated).toLocaleString('en-US', {
+    ? new Date(student.last_updated).toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
         month: 'short',
         day: 'numeric',
         year: 'numeric',
         hour: 'numeric',
         minute: 'numeric',
         hour12: true,
-      })
+      }) + ' IST'
     : 'Just now';
 
   return (

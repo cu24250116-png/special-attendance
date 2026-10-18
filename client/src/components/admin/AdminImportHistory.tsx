@@ -177,7 +177,7 @@ export const AdminImportHistory: React.FC = () => {
                       {job.filename}
                     </h4>
                     <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      {new Date(job.created_at).toLocaleString()}
+                      {new Date(job.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST
                     </p>
                   </div>
                 </div>
@@ -283,7 +283,7 @@ export const AdminImportHistory: React.FC = () => {
                 history.map((job) => (
                   <tr key={job.id} className="hover:bg-slate-800/40 transition">
                     <td className="py-3.5 px-4 font-mono text-slate-300">
-                      {new Date(job.created_at).toLocaleString()}
+                      {new Date(job.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST
                     </td>
                     <td className="py-3.5 px-4 font-medium text-white flex items-center space-x-2">
                       <FileSpreadsheet className="w-4 h-4 text-blue-400 flex-shrink-0" />
