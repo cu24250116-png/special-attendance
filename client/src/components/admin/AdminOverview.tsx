@@ -18,9 +18,10 @@ import {
 
 interface AdminOverviewProps {
   onNavigateTab: (tab: any) => void;
+  currentUser?: any;
 }
 
-export const AdminOverview: React.FC<AdminOverviewProps> = ({ onNavigateTab }) => {
+export const AdminOverview: React.FC<AdminOverviewProps> = ({ onNavigateTab, currentUser }) => {
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -74,9 +75,22 @@ export const AdminOverview: React.FC<AdminOverviewProps> = ({ onNavigateTab }) =
       {/* Top Banner */}
       <div className="glass-panel rounded-2xl p-6 border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white font-['Outfit']">Administrative Analytics</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Real-time college attendance posture, special assignment compliance, and cloud synchronization health.
+          <div className="flex items-center space-x-2 mb-1.5 flex-wrap gap-y-1">
+            <h1 className="text-2xl font-bold text-white font-['Outfit']">Administrative Analytics</h1>
+            {currentUser?.role === 'hod' ? (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-950 text-indigo-300 border border-indigo-800/60 font-mono">
+                HOD • {currentUser.department}
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800/60 font-mono">
+                Super Admin • College-Wide
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-400">
+            {currentUser?.role === 'hod'
+              ? `Authorized view for ${currentUser.department}. Showing metrics and student compliance for your department.`
+              : 'Real-time college attendance posture, special assignment compliance, and cloud synchronization health across all departments.'}
           </p>
         </div>
 

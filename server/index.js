@@ -13,6 +13,8 @@ import {
   hashPassword,
   comparePassword,
   requireAdmin,
+  requireSuperAdmin,
+  isSuperAdminRole,
   requireStudentOrAdmin,
   rateLimitMiddleware,
   generateStudentOtp,
@@ -70,7 +72,15 @@ app.get('/api/health', (req, res) => {
 // AUTHENTICATION ROUTES
 // ==========================================
 
-// Admin Login
+// Helper to get HOD department if user is restricted
+function getHodDepartment(user) {
+  if (!user) return null;
+  if (user.role === 'super_admin') return null;
+  if (user.role === 'admin' && (user.department === 'ALL' || !user.department)) return null;
+  return (user.department && user.department !== 'ALL') ? user.department : null;
+}
+
+// Admin & HOD Login
 app.post('/api/auth/admin/login', rateLimitMiddleware(15, 60000), async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -84,14 +94,22 @@ app.post('/api/auth/admin/login', rateLimitMiddleware(15, 60000), async (req, re
     );
 
     if (!user || !comparePassword(password, user.password_hash)) {
-      return res.status(401).json({ error: 'Invalid credentials. Please verify and try again.' });
+      return res.status(401).json({ error: 'Invalid administrator credentials. Please verify and try again.' });
     }
+
+    if (user.status === 'disabled') {
+      return res.status(403).json({ error: 'This administrator account has been disabled. Please contact the Super Admin.' });
+    }
+
+    const role = user.role || 'hod';
+    const department = user.department || 'ALL';
 
     const token = generateToken({
       id: user.id,
       email: user.email,
       username: user.username,
-      role: 'admin',
+      role,
+      department,
     });
 
     res.json({
@@ -101,7 +119,10 @@ app.post('/api/auth/admin/login', rateLimitMiddleware(15, 60000), async (req, re
         id: user.id,
         email: user.email,
         username: user.username,
-        role: user.role,
+        role,
+        department,
+        status: user.status || 'active',
+        must_change_password: Boolean(user.must_change_password),
       },
     });
   } catch (err) {
@@ -109,9 +130,247 @@ app.post('/api/auth/admin/login', rateLimitMiddleware(15, 60000), async (req, re
   }
 });
 
+// Admin Self Change Password (for logged-in Super Admin or HOD)
+app.post('/api/auth/admin/change-password', requireAdmin, async (req, res) => {
+  const { currentPassword, newPassword, confirmPassword } = req.body;
+
+  if (!newPassword || newPassword.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
+  }
+
+  if (confirmPassword && newPassword !== confirmPassword) {
+    return res.status(400).json({ error: 'New password and confirm password do not match.' });
+  }
+
+  try {
+    const user = await db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    if (!user) {
+      return res.status(404).json({ error: 'User account not found.' });
+    }
+
+    const isFirstLoginChange = user.must_change_password === 1 || user.must_change_password === true;
+    if (!isFirstLoginChange || currentPassword) {
+      if (!currentPassword) {
+        return res.status(400).json({ error: 'Current password is required.' });
+      }
+      if (!comparePassword(currentPassword, user.password_hash)) {
+        return res.status(401).json({ error: 'Current password is incorrect.' });
+      }
+    }
+
+    if (currentPassword && newPassword === currentPassword) {
+      return res.status(400).json({ error: 'New password must be different from your current password.' });
+    }
+
+    const newHash = hashPassword(newPassword);
+    await db.run('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?', [newHash, req.user.id]);
+
+    res.json({
+      success: true,
+      message: 'Password updated successfully.',
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        department: user.department,
+        status: user.status,
+        must_change_password: false,
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Failed to change password: ${err.message}` });
+  }
+});
+
 // Admin Me
 app.get('/api/auth/admin/me', requireAdmin, async (req, res) => {
   res.json({ user: req.user });
+});
+
+// ==========================================
+// SUPER ADMIN: MULTI-ADMIN & HOD MANAGEMENT
+// ==========================================
+
+// Get all admin & HOD users (Super Admin only)
+app.get('/api/admin/users', requireSuperAdmin, async (req, res) => {
+  try {
+    const users = await db.all(`
+      SELECT id, username, email, role, department, status, must_change_password, created_at, created_by
+      FROM users
+      ORDER BY created_at DESC
+    `);
+    res.json({ users });
+  } catch (err) {
+    res.status(500).json({ error: `Failed to fetch administrator accounts: ${err.message}` });
+  }
+});
+
+// Create new HOD or Admin account (Super Admin only)
+app.post('/api/admin/users', requireSuperAdmin, async (req, res) => {
+  const { username, email, department, role = 'hod', initialPassword, password } = req.body;
+  const rawPassword = initialPassword || password;
+
+  if (!username || !username.trim()) {
+    return res.status(400).json({ error: 'Full name / username is required.' });
+  }
+
+  if (!email || !email.trim() || !email.includes('@')) {
+    return res.status(400).json({ error: 'Valid official email address is required.' });
+  }
+
+  const cleanRole = (role === 'super_admin') ? 'super_admin' : 'hod';
+  const cleanDept = (cleanRole === 'super_admin' && (!department || department === 'ALL')) ? 'ALL' : (department || '').trim();
+
+  if (cleanRole === 'hod' && (!cleanDept || cleanDept === 'ALL')) {
+    return res.status(400).json({ error: 'Please assign a specific Department for this HOD account.' });
+  }
+
+  const tempPassword = (rawPassword && rawPassword.trim().length >= 8)
+    ? rawPassword.trim()
+    : `HOD@${Math.floor(100000 + Math.random() * 900000)}`;
+
+  try {
+    const existing = await db.get('SELECT id, email, username FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)', [email.trim(), username.trim()]);
+    if (existing) {
+      if (existing.email.toLowerCase() === email.trim().toLowerCase()) {
+        return res.status(400).json({ error: `An administrator account with email "${email.trim()}" already exists.` });
+      } else {
+        return res.status(400).json({ error: `An administrator account with name "${username.trim()}" already exists. Please choose a unique name.` });
+      }
+    }
+
+    const id = `ADM-${uuidv4().slice(0, 8).toUpperCase()}`;
+    const passwordHash = hashPassword(tempPassword);
+    const now = new Date().toISOString();
+    const creatorName = req.user.username || req.user.email || 'Super Admin';
+
+    await db.run(`
+      INSERT INTO users (id, username, email, password_hash, role, department, status, must_change_password, created_at, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)
+    `, [id, username.trim(), email.trim(), passwordHash, cleanRole, cleanDept, now, creatorName]);
+
+    res.json({
+      success: true,
+      message: `Account created successfully for ${username.trim()}.`,
+      user: {
+        id,
+        username: username.trim(),
+        email: email.trim(),
+        role: cleanRole,
+        department: cleanDept,
+        status: 'active',
+        must_change_password: true,
+        created_at: now,
+        created_by: creatorName,
+      },
+      temporaryPassword: tempPassword,
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Failed to create administrator account: ${err.message}` });
+  }
+});
+
+// Update an HOD or Admin account (status, role, department)
+app.patch('/api/admin/users/:id', requireSuperAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { username, department, role, status } = req.body;
+
+  try {
+    const target = await db.get('SELECT * FROM users WHERE id = ?', [id]);
+    if (!target) {
+      return res.status(404).json({ error: 'Administrator account not found.' });
+    }
+
+    if (target.id === req.user.id && status === 'disabled') {
+      return res.status(400).json({ error: 'You cannot disable your own Super Admin account.' });
+    }
+
+    const updates = [];
+    const params = [];
+
+    if (username && username.trim()) {
+      updates.push('username = ?');
+      params.push(username.trim());
+    }
+    if (department !== undefined) {
+      updates.push('department = ?');
+      params.push(department.trim());
+    }
+    if (role && (role === 'super_admin' || role === 'hod')) {
+      updates.push('role = ?');
+      params.push(role);
+    }
+    if (status && (status === 'active' || status === 'disabled')) {
+      updates.push('status = ?');
+      params.push(status);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid fields provided for update.' });
+    }
+
+    params.push(id);
+    await db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+
+    const updatedUser = await db.get(
+      'SELECT id, username, email, role, department, status, must_change_password, created_at, created_by FROM users WHERE id = ?',
+      [id]
+    );
+
+    res.json({ success: true, message: 'Account updated successfully.', user: updatedUser });
+  } catch (err) {
+    res.status(500).json({ error: `Failed to update account: ${err.message}` });
+  }
+});
+
+// Reset HOD / Admin Password by Super Admin
+app.post('/api/admin/users/:id/reset-password', requireSuperAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { temporaryPassword } = req.body;
+
+  try {
+    const target = await db.get('SELECT * FROM users WHERE id = ?', [id]);
+    if (!target) {
+      return res.status(404).json({ error: 'Administrator account not found.' });
+    }
+
+    const tempPassword = (temporaryPassword && temporaryPassword.trim().length >= 8)
+      ? temporaryPassword.trim()
+      : `Reset@${Math.floor(100000 + Math.random() * 900000)}`;
+
+    const newHash = hashPassword(tempPassword);
+    await db.run('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?', [newHash, id]);
+
+    res.json({
+      success: true,
+      message: `Password has been reset for ${target.username || target.email}. The user must set a new password on their next login.`,
+      temporaryPassword: tempPassword,
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Failed to reset password: ${err.message}` });
+  }
+});
+
+// Delete an HOD or Admin account
+app.delete('/api/admin/users/:id', requireSuperAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  if (id === req.user.id) {
+    return res.status(400).json({ error: 'You cannot delete your own account.' });
+  }
+
+  try {
+    const target = await db.get('SELECT * FROM users WHERE id = ?', [id]);
+    if (!target) {
+      return res.status(404).json({ error: 'Account not found.' });
+    }
+
+    await db.run('DELETE FROM users WHERE id = ?', [id]);
+    res.json({ success: true, message: `Account "${target.username || target.email}" deleted successfully.` });
+  } catch (err) {
+    res.status(500).json({ error: `Failed to delete account: ${err.message}` });
+  }
 });
 
 // Universal flexible student lookup supporting:
@@ -663,13 +922,24 @@ app.get('/api/students/:cu_id/assignments', requireStudentOrAdmin, async (req, r
 
 // Admin Analytics Overview
 app.get('/api/admin/analytics', requireAdmin, async (req, res) => {
-  const totalStudentsRow = await db.get('SELECT COUNT(*) as count FROM students');
+  const hodDept = getHodDepartment(req.user);
+  let studentWhere = 'WHERE 1=1';
+  const studentParams = [];
+  if (hodDept) {
+    studentWhere += ' AND (LOWER(branch) = LOWER(?) OR LOWER(course) = LOWER(?))';
+    studentParams.push(hodDept, hodDept);
+  }
+
+  const totalStudentsRow = await db.get(`SELECT COUNT(*) as count FROM students ${studentWhere}`, studentParams);
   const totalStudents = totalStudentsRow ? Number(totalStudentsRow.count) : 0;
 
-  const avgAttendanceRow = await db.get('SELECT AVG(overall_percentage) as avg FROM students');
+  const avgAttendanceRow = await db.get(`SELECT AVG(overall_percentage) as avg FROM students ${studentWhere}`, studentParams);
   const averageAttendance = avgAttendanceRow ? Math.round((Number(avgAttendanceRow.avg) || 0) * 10) / 10 : 0;
 
-  const defaultersRow = await db.get('SELECT COUNT(*) as count FROM students WHERE overall_percentage < 75');
+  const defaultersRow = await db.get(
+    `SELECT COUNT(*) as count FROM students ${studentWhere} AND overall_percentage < 75`,
+    studentParams
+  );
   const defaultersCount = defaultersRow ? Number(defaultersRow.count) : 0;
 
   const totalAssignmentsRow = await db.get('SELECT COUNT(*) as count FROM assignments');
@@ -700,19 +970,31 @@ app.get('/api/admin/analytics', requireAdmin, async (req, res) => {
     pendingAssignments,
     recentImports,
     cloudSync,
+    adminRole: req.user.role,
+    adminDepartment: req.user.department,
     serverTime: new Date().toISOString(),
   });
 });
 
-// Admin Students List (with search, filter, pagination)
+// Admin Students List (with search, filter, pagination, and HOD department restriction)
 app.get('/api/admin/students', requireAdmin, async (req, res) => {
   const { search, branch, semester, threshold, page = 1, limit = 20 } = req.query;
   const offset = (Math.max(1, parseInt(page, 10)) - 1) * parseInt(limit, 10);
+
+  const hodDept = getHodDepartment(req.user);
 
   let query = 'SELECT * FROM students WHERE 1=1';
   let countQuery = 'SELECT COUNT(*) as count FROM students WHERE 1=1';
   const params = [];
   const countParams = [];
+
+  // Enforce HOD department isolation
+  if (hodDept) {
+    query += ' AND (LOWER(branch) = LOWER(?) OR LOWER(course) = LOWER(?))';
+    countQuery += ' AND (LOWER(branch) = LOWER(?) OR LOWER(course) = LOWER(?))';
+    params.push(hodDept, hodDept);
+    countParams.push(hodDept, hodDept);
+  }
 
   if (search) {
     const s = `%${search.trim().toLowerCase()}%`;
@@ -772,6 +1054,7 @@ app.get('/api/admin/students', requireAdmin, async (req, res) => {
 app.get('/api/admin/attendance', requireAdmin, async (req, res) => {
   const { date, subject, cu_id, page = 1, limit = 25 } = req.query;
   const offset = (Math.max(1, parseInt(page, 10)) - 1) * parseInt(limit, 10);
+  const hodDept = getHodDepartment(req.user);
 
   let query = `
     SELECT a.*, s.student_name, s.branch, s.section
@@ -780,6 +1063,12 @@ app.get('/api/admin/attendance', requireAdmin, async (req, res) => {
     WHERE 1=1
   `;
   const params = [];
+
+  // Enforce HOD department isolation
+  if (hodDept) {
+    query += ' AND (LOWER(s.branch) = LOWER(?) OR LOWER(s.course) = LOWER(?))';
+    params.push(hodDept, hodDept);
+  }
 
   if (date) {
     query += ' AND a.attendance_date = ?';
@@ -811,6 +1100,7 @@ app.get('/api/admin/attendance', requireAdmin, async (req, res) => {
 // Admin Assignment Records
 app.get('/api/admin/assignments', requireAdmin, async (req, res) => {
   const { status, subject, cu_id } = req.query;
+  const hodDept = getHodDepartment(req.user);
 
   let query = `
     SELECT a.*, s.student_name, s.branch, s.section
@@ -819,6 +1109,12 @@ app.get('/api/admin/assignments', requireAdmin, async (req, res) => {
     WHERE 1=1
   `;
   const params = [];
+
+  // Enforce HOD department isolation
+  if (hodDept) {
+    query += ' AND (LOWER(s.branch) = LOWER(?) OR LOWER(s.course) = LOWER(?))';
+    params.push(hodDept, hodDept);
+  }
 
   if (status && status !== 'all') {
     query += ' AND LOWER(a.submission_status) LIKE ?';
@@ -839,14 +1135,25 @@ app.get('/api/admin/assignments', requireAdmin, async (req, res) => {
   res.json({ assignments });
 });
 
-// Manual update single student record (e.g. Test requirement 4: Admin updates a student's attendance from 88% to 92%)
+// Manual update single student record (with HOD authorization check)
 app.post('/api/admin/students/:cu_id', requireAdmin, async (req, res) => {
   const cuId = req.params.cu_id.toUpperCase().trim();
   const { overall_percentage, total_sessions, present_sessions, absent_sessions, student_name } = req.body;
+  const hodDept = getHodDepartment(req.user);
 
   const existing = await db.get('SELECT * FROM students WHERE cu_id = ?', [cuId]);
   if (!existing) {
     return res.status(404).json({ error: 'Student not found' });
+  }
+
+  // Validate HOD can only edit students in their department
+  if (hodDept) {
+    const studentDept = existing.branch || existing.course || '';
+    if (!studentDept.toLowerCase().includes(hodDept.toLowerCase()) && !hodDept.toLowerCase().includes(studentDept.toLowerCase())) {
+      return res.status(403).json({
+        error: `Access denied: You are only authorized to manage students in your department ("${hodDept}").`,
+      });
+    }
   }
 
   const now = new Date().toISOString();
@@ -910,13 +1217,14 @@ app.post('/api/admin/excel/import', requireAdmin, upload.single('file'), async (
 
   const mode = req.body.mode || 'incremental'; // 'incremental' or 'replace'
   const adminName = req.user?.username || req.user?.email || 'College Admin';
+  const hodDept = getHodDepartment(req.user);
 
   try {
     const result = await ExcelProcessor.importExcel(
       req.file.buffer,
       req.file.originalname,
       adminName,
-      { mode, type: 'admin_upload' }
+      { mode, type: 'admin_upload', allowedDepartment: hodDept }
     );
 
     // Broadcast live update to all students and admins
@@ -993,13 +1301,13 @@ app.delete('/api/admin/excel/jobs/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// Clear all imported Excel datasets, student rosters, attendance and assignments
-app.delete('/api/admin/excel/clear-all', requireAdmin, async (req, res) => {
+// Clear all imported Excel datasets, student rosters, attendance and assignments (SUPER ADMIN ONLY)
+app.delete('/api/admin/excel/clear-all', requireSuperAdmin, async (req, res) => {
   try {
     const result = await ExcelProcessor.clearAllData();
     realtimeHub.broadcastCollegeUpdate({
       source: 'all_data_cleared',
-      clearedBy: req.user?.username || req.user?.email || 'College Admin',
+      clearedBy: req.user?.username || req.user?.email || 'Super Admin',
     });
     res.json(result);
   } catch (err) {
@@ -1019,12 +1327,12 @@ app.get('/api/cloud-sync/status', requireAdmin, async (req, res) => {
   res.json(status);
 });
 
-app.post('/api/cloud-sync/config', requireAdmin, async (req, res) => {
+app.post('/api/cloud-sync/config', requireSuperAdmin, async (req, res) => {
   const updated = await cloudSyncService.updateConfig(req.body);
   res.json({ success: true, updated });
 });
 
-app.post('/api/cloud-sync/sync-now', requireAdmin, async (req, res) => {
+app.post('/api/cloud-sync/sync-now', requireSuperAdmin, async (req, res) => {
   const result = await cloudSyncService.triggerManualSync();
   res.json(result);
 });
@@ -1035,6 +1343,21 @@ app.post('/api/cloud-sync/sync-now', requireAdmin, async (req, res) => {
 
 // Get all distinct student departments/branches with counts for message targeting
 app.get('/api/admin/departments', requireAdmin, async (req, res) => {
+  const hodDept = getHodDepartment(req.user);
+  if (hodDept) {
+    try {
+      const countRow = await db.get(
+        'SELECT COUNT(*) as count FROM students WHERE LOWER(branch) = LOWER(?) OR LOWER(course) = LOWER(?)',
+        [hodDept, hodDept]
+      );
+      return res.json({
+        departments: [{ name: hodDept, student_count: countRow ? Number(countRow.count) : 0 }]
+      });
+    } catch (err) {
+      return res.json({ departments: [{ name: hodDept, student_count: 0 }] });
+    }
+  }
+
   try {
     const branches = await db.all(`
       SELECT branch as name, COUNT(*) as student_count
@@ -1063,28 +1386,40 @@ app.post('/api/admin/messages', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Message content cannot be blank' });
   }
 
+  const hodDept = getHodDepartment(req.user);
+  let effectiveTitle = sender_title;
+  let effectiveTargetType = target_type;
+  let effectiveTargetValue = target_value;
+
+  // HOD notices are strictly scoped to their assigned department
+  if (hodDept) {
+    effectiveTitle = sender_title || 'Message from HOD';
+    effectiveTargetType = 'department';
+    effectiveTargetValue = hodDept;
+  }
+
   const id = uuidv4();
   const now = new Date().toISOString();
-  const adminName = req.user?.username || req.user?.email || 'Dean Academic';
+  const adminName = req.user?.username || req.user?.email || 'College Admin';
 
   try {
     await db.run(`
       INSERT INTO admin_messages (id, sender_title, message, target_type, target_value, priority, created_at, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, [id, sender_title.trim(), message.trim(), target_type, target_value || null, priority, now, adminName]);
+    `, [id, effectiveTitle.trim(), message.trim(), effectiveTargetType, effectiveTargetValue || null, priority, now, adminName]);
 
     const createdNotice = {
       id,
-      sender_title: sender_title.trim(),
+      sender_title: effectiveTitle.trim(),
       message: message.trim(),
-      target_type,
-      target_value: target_value || null,
+      target_type: effectiveTargetType,
+      target_value: effectiveTargetValue || null,
       priority,
       created_at: now,
       created_by: adminName,
     };
 
-    // Broadcast in real-time via SSE so all online students receive the popup instantly
+    // Broadcast in real-time via SSE so online students receive the popup instantly
     realtimeHub.broadcastAdminMessage(createdNotice);
 
     res.json({ success: true, message: createdNotice });
@@ -1201,7 +1536,7 @@ async function startServer() {
     console.log(` College Special Attendance & Assignment Server`);
     console.log(` Running on: http://localhost:${PORT}`);
     console.log(` Realtime SSE Stream: http://localhost:${PORT}/api/realtime/stream`);
-    console.log(` Default Admin: ${process.env.ADMIN_DEFAULT_EMAIL || 'admin@college.edu'} / ${process.env.ADMIN_DEFAULT_PASSWORD || 'Admin@123'}`);
+    console.log(` Multi-Admin Security & Authorization: Active & Enforced`);
     console.log(`====================================================`);
   });
 }

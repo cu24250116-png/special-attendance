@@ -64,7 +64,7 @@ A full-stack, responsive, mobile-first web application and PWA for colleges and 
 - **Mobile Bottom Navigation**: Compact navigation bar for smartphone viewports (Dashboard, Attendance, Assignments, Profile).
 
 ### B. Admin Panel
-- **Secure Admin Authentication**: JWT-based session security with bcrypt password hashing (`admin@college.edu` / `Admin@123`).
+- **Secure Multi-Admin Authentication**: JWT-based session security with bcrypt password hashing and role-based access control (Super Admin & Department HODs).
 - **Excel Drag-and-Drop Ingestion**: Uploads `.xlsx`, `.xls`, and `.csv` files.
 - **Pre-Import Preview & Validation**: Previews rows and columns across `Students`, `Attendance`, and `Assignments` sheets before committing.
 - **Idempotent Imports**: Merges records using CU ID as the unique key; re-uploading the same file does not create duplicate entries.
@@ -112,12 +112,14 @@ Open your browser at:
 
 ---
 
-## 5. Default Evaluation Credentials & Demo Accounts
+## 5. Multi-Admin Setup & Student Testing Accounts
 
-### Administrator Login
-- **Email**: `admin@college.edu`
-- **Password**: `Admin@123`
-*(A convenient "Auto-fill Demo Credentials" button is present on the admin login page)*
+### Initial Super Administrator Setup
+The initial Super Administrator account is configured securely using private environment variables:
+- **`SUPER_ADMIN_EMAIL`**: The official college email for the initial Super Admin.
+- **`SUPER_ADMIN_PASSWORD`**: Strong initial password (at least 8 characters).
+
+On deployment (such as Render Web Service Environment settings), set these two private variables. The server automatically initializes or verifies the Super Admin account without exposing credentials in logs or frontend code. The Super Admin can then log in and create individual HOD accounts for each department with department-scoped access.
 
 ### Sample Student CU IDs for Testing
 | CU ID | Student Name | Department | Initial Attendance | Note |

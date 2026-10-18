@@ -59,8 +59,17 @@ export function verifyToken(token) {
   }
 }
 
-// Admin only middleware
-export function requireAdmin(req, res, next) {
+export function isAdminRole(role) {
+  return role === 'super_admin' || role === 'hod' || role === 'admin';
+}
+
+export function isSuperAdminRole(user) {
+  if (!user) return false;
+  return user.role === 'super_admin' || (user.role === 'admin' && (user.department === 'ALL' || !user.department));
+}
+
+// Admin only middleware (Super Admin or HOD)
+export async function requireAdmin(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Authorization token required' });
@@ -69,12 +78,49 @@ export function requireAdmin(req, res, next) {
   const token = authHeader.split(' ')[1];
   const decoded = verifyToken(token);
 
-  if (!decoded || decoded.role !== 'admin') {
+  if (!decoded || !isAdminRole(decoded.role)) {
     return res.status(403).json({ error: 'Access forbidden: Administrator privileges required' });
   }
 
-  req.user = decoded;
-  next();
+  try {
+    const user = await db.get(
+      'SELECT id, username, email, role, department, status, must_change_password FROM users WHERE id = ?',
+      [decoded.id]
+    );
+
+    if (!user) {
+      return res.status(401).json({ error: 'Administrator account no longer exists' });
+    }
+
+    if (user.status === 'disabled') {
+      return res.status(403).json({ error: 'This administrator account has been disabled. Please contact the Super Admin.' });
+    }
+
+    req.user = {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role || decoded.role,
+      department: user.department || 'ALL',
+      status: user.status || 'active',
+      must_change_password: Boolean(user.must_change_password),
+    };
+    next();
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to verify administrator status' });
+  }
+}
+
+// Super Admin only middleware
+export async function requireSuperAdmin(req, res, next) {
+  await requireAdmin(req, res, () => {
+    if (!isSuperAdminRole(req.user)) {
+      return res.status(403).json({
+        error: 'Access denied: Super Administrator privileges required. You do not have permission to manage administrator accounts.',
+      });
+    }
+    next();
+  });
 }
 
 // Student or Admin access middleware
@@ -93,13 +139,13 @@ export function requireStudentOrAdmin(req, res, next) {
 
   const targetCuId = (req.params.cu_id || req.query.cu_id || req.body?.cu_id || '').toUpperCase().trim();
 
-  // If admin, allowed to view any student
-  if (decoded.role === 'admin') {
+  // If admin or HOD, allowed to view student records
+  if (isAdminRole(decoded.role)) {
     req.user = decoded;
     return next();
   }
 
-  // If student, can only view their own records
+  // If student, can ONLY view their own records
   if (decoded.role === 'student') {
     if (targetCuId) {
       const decodedUpper = (decoded.cu_id || '').toUpperCase().trim();
@@ -123,7 +169,6 @@ const studentOtpStore = new Map();
 
 export function generateStudentOtp(cuId) {
   const normalizedCuId = cuId.toUpperCase().trim();
-  // Generate a 6-digit OTP code (in dev mode, 123456 is also accepted for instant testing)
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   studentOtpStore.set(normalizedCuId, {
     code,
@@ -134,10 +179,6 @@ export function generateStudentOtp(cuId) {
 
 export function verifyStudentOtp(cuId, inputCode) {
   const normalizedCuId = cuId.toUpperCase().trim();
-  // Master demo code for ease of evaluation and college lab testing
-  if (inputCode === '123456') {
-    return true;
-  }
   const stored = studentOtpStore.get(normalizedCuId);
   if (!stored) return false;
   if (Date.now() > stored.expiresAt) {

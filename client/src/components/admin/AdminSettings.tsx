@@ -1,9 +1,24 @@
 import React, { useEffect, useState } from 'react';
-import { Settings, Server, Radio, Database, ShieldCheck, Key, RefreshCw } from 'lucide-react';
+import { Settings, Server, Radio, Database, ShieldCheck, Key, RefreshCw, Lock, CheckCircle2, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { api } from '../../services/api';
 
-export const AdminSettings: React.FC = () => {
+interface AdminSettingsProps {
+  currentUser?: any;
+}
+
+export const AdminSettings: React.FC<AdminSettingsProps> = ({ currentUser }) => {
   const [healthData, setHealthData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  // Password Change State
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [passLoading, setPassLoading] = useState(false);
+  const [passError, setPassError] = useState<string | null>(null);
+  const [passSuccess, setPassSuccess] = useState<string | null>(null);
 
   const fetchHealth = async () => {
     try {
@@ -20,6 +35,42 @@ export const AdminSettings: React.FC = () => {
   useEffect(() => {
     fetchHealth();
   }, []);
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentPassword) {
+      setPassError('Please enter your current password.');
+      return;
+    }
+    if (!newPassword || newPassword.length < 8) {
+      setPassError('New password must be at least 8 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPassError('New password and confirmation do not match.');
+      return;
+    }
+
+    setPassLoading(true);
+    setPassError(null);
+    setPassSuccess(null);
+
+    try {
+      const res = await api.adminChangePassword({
+        currentPassword,
+        newPassword,
+      });
+      setPassSuccess(res.message || 'Password updated successfully!');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setPassSuccess(null), 5000);
+    } catch (err: any) {
+      setPassError(err.message || 'Failed to update password. Verify your current password.');
+    } finally {
+      setPassLoading(false);
+    }
+  };
 
   const [customUrl, setCustomUrl] = useState(() => localStorage.getItem('custom_api_url') || '');
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -47,9 +98,9 @@ export const AdminSettings: React.FC = () => {
             <Settings className="w-4 h-4" />
             <span>ERP Infrastructure Controls</span>
           </div>
-          <h1 className="text-2xl font-bold text-white font-['Outfit']">System Settings & Health</h1>
+          <h1 className="text-2xl font-bold text-white font-['Outfit']">System Settings &amp; Security</h1>
           <p className="text-xs text-slate-400 mt-1">
-            Realtime connection health, database clustering mode, and college statutory thresholds.
+            Account security, password management, and database infrastructure.
           </p>
         </div>
 
@@ -57,45 +108,114 @@ export const AdminSettings: React.FC = () => {
           type="button"
           onClick={fetchHealth}
           className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition self-start sm:self-auto"
+          title="Refresh server health"
         >
           <RefreshCw className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Cloud & Background Persistence Card */}
-      <div className="glass-panel rounded-2xl p-6 border border-indigo-800/50 bg-gradient-to-r from-slate-900 via-indigo-950/20 to-slate-900 space-y-4">
+      {/* Admin Password Change Card */}
+      <div className="glass-panel rounded-2xl p-6 border border-slate-800 space-y-4">
         <div className="flex items-center space-x-2.5 text-indigo-400">
-          <Server className="w-5 h-5" />
-          <h3 className="text-sm font-bold uppercase tracking-wider font-mono">
-            24/7 Background Persistence &amp; Server Configuration
-          </h3>
+          <Key className="w-5 h-5" />
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-wider font-mono text-white">
+              Change Administrator Password
+            </h3>
+            <p className="text-xs text-slate-400">
+              Update password for signed-in administrator ({currentUser?.username || currentUser?.email || 'Admin'}).
+            </p>
+          </div>
         </div>
-        <p className="text-xs text-slate-300 leading-relaxed">
-          Students can fetch and view their records continuously even when Admin is logged out or when VS Code is closed.
-          Data is persistently written to SQLite disk storage and cached on mobile clients.
-        </p>
 
-        <form onSubmit={handleSaveUrl} className="pt-2 flex flex-col sm:flex-row gap-2">
-          <input
-            type="text"
-            value={customUrl}
-            onChange={(e) => setCustomUrl(e.target.value)}
-            placeholder="Custom Backend API URL (e.g., https://my-server.onrender.com or http://192.168.1.13:5000)"
-            className="flex-1 px-4 py-2.5 bg-slate-900/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-indigo-500"
-          />
+        {passError && (
+          <div className="p-3.5 rounded-xl bg-red-950/60 border border-red-800/60 text-red-200 text-xs flex items-start space-x-2.5 animate-fadeIn">
+            <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+            <span>{passError}</span>
+          </div>
+        )}
+
+        {passSuccess && (
+          <div className="p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-200 text-xs flex items-start space-x-2.5 animate-fadeIn">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+            <span>{passSuccess}</span>
+          </div>
+        )}
+
+        <form onSubmit={handlePasswordSubmit} className="space-y-4 max-w-xl text-xs">
+          <div>
+            <label className="block font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+              Current Password
+            </label>
+            <div className="relative">
+              <input
+                type={showCurrentPass ? 'text' : 'password'}
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="Enter current password"
+                className="w-full px-3.5 py-2.5 pr-10 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowCurrentPass(!showCurrentPass)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                tabIndex={-1}
+              >
+                {showCurrentPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                New Password (min 8 chars)
+              </label>
+              <div className="relative">
+                <input
+                  type={showNewPass ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  className="w-full px-3.5 py-2.5 pr-10 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPass(!showNewPass)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  tabIndex={-1}
+                >
+                  {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                Confirm New Password
+              </label>
+              <input
+                type={showNewPass ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm password"
+                className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                required
+              />
+            </div>
+          </div>
+
           <button
             type="submit"
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-900/30 transition flex items-center justify-center space-x-1.5"
+            disabled={passLoading || !currentPassword || !newPassword}
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-semibold shadow-md transition disabled:opacity-50 flex items-center space-x-2"
           >
-            <span>Save &amp; Switch API</span>
+            <Lock className="w-3.5 h-3.5" />
+            <span>{passLoading ? 'Updating Password...' : 'Update Password'}</span>
           </button>
         </form>
-
-        {saveSuccess && (
-          <p className="text-xs text-emerald-400 font-semibold animate-fadeIn">
-            ✓ Backend URL updated! Reloading application...
-          </p>
-        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -141,16 +261,16 @@ export const AdminSettings: React.FC = () => {
             <div className="flex justify-between">
               <span className="text-slate-400">Storage Driver</span>
               <span className="text-white font-semibold">
-                SQLite WebAssembly &amp; PostgreSQL Dual Adapter
+                PostgreSQL &amp; SQLite Dual Mode Engine
               </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Production Cloud Database</span>
+              <span className="text-emerald-400 font-semibold">PostgreSQL (Connected via DATABASE_URL)</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Local Database File</span>
               <span className="font-mono text-slate-300">server/data/college_attendance.sqlite</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Remote Cloud Database</span>
-              <span className="text-slate-400">Plug &amp; Play DATABASE_URL (Supabase / Neon)</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Atomicity &amp; Idempotency</span>

@@ -18,7 +18,11 @@ import {
   X
 } from 'lucide-react';
 
-export const AdminExcelImport: React.FC = () => {
+interface AdminExcelImportProps {
+  currentUser?: any;
+}
+
+export const AdminExcelImport: React.FC<AdminExcelImportProps> = ({ currentUser }) => {
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
@@ -174,6 +178,16 @@ export const AdminExcelImport: React.FC = () => {
           <span>Download Official .XLSX Template</span>
         </a>
       </div>
+
+      {/* HOD Departmental Authorization Notice */}
+      {currentUser?.role === 'hod' && (
+        <div className="p-3.5 rounded-xl bg-indigo-950/70 border border-indigo-800/60 text-indigo-200 text-xs flex items-center space-x-2.5 animate-fadeIn">
+          <FileCheck2 className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+          <span>
+            Authorized Department: <strong>{currentUser.department}</strong>. Uploaded student rows belonging to other branches/departments are securely filtered and skipped.
+          </span>
+        </div>
+      )}
 
       {/* Success notification */}
       {successNotice && (

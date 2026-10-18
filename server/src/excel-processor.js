@@ -407,7 +407,22 @@ export class ExcelProcessor {
           studentName = `Student ${cuId}`;
         }
 
-      affectedCuIds.add(cuId);
+        // Department-level permission check for HOD uploads
+        if (options.allowedDepartment) {
+          const rowDept = String(mapped.branch || mapped.course || '').trim();
+          if (rowDept && !rowDept.toLowerCase().includes(options.allowedDepartment.toLowerCase()) && !options.allowedDepartment.toLowerCase().includes(rowDept.toLowerCase())) {
+            errors.push({
+              sheet_name: 'Students',
+              row_number: i + 2,
+              cu_id: cuId || null,
+              error_message: `Row skipped: Student belongs to "${rowDept}", which is outside your authorized department ("${options.allowedDepartment}").`,
+              raw_data: JSON.stringify(raw),
+            });
+            continue;
+          }
+        }
+
+        affectedCuIds.add(cuId);
 
       // Student Password: By default, the student's password is their CU ID (or roll number)
       const defaultPassword = cuId;

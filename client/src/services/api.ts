@@ -1,4 +1,4 @@
-import { Student, AttendanceRecord, DailyAttendanceSummary, Assignment, AdminAnalytics, ImportJob, CloudSyncConfig, SpecialClassAttendance, AdminMessage } from '../types';
+import { Student, AttendanceRecord, DailyAttendanceSummary, Assignment, AdminAnalytics, ImportJob, CloudSyncConfig, SpecialClassAttendance, AdminMessage, AdminUser } from '../types';
 import bundledDataRaw from '../data/bundledAttendanceData.json';
 
 const bundledData = bundledDataRaw as unknown as {
@@ -10,6 +10,9 @@ const bundledData = bundledDataRaw as unknown as {
     assignments: any;
   }>;
 };
+
+// Official 24/7 Production Cloud Endpoint on Render
+export const PRODUCTION_SERVER_URL = 'https://college-special-attendance.onrender.com';
 
 // Check if running in native Android / Capacitor environment
 export const isNativeApp = (): boolean => {
@@ -29,11 +32,18 @@ export const getApiBase = (): string => {
     const trimmed = custom.trim().replace(/\/+$/, '');
     return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
   }
-  // Native Android APK fallback to local network server if on same WiFi
+  // Native Android APK connects directly to production cloud HTTPS API
   if (isNativeApp()) {
-    return 'http://10.111.193.91:5000/api';
+    return `${PRODUCTION_SERVER_URL}/api`;
   }
-  return '/api';
+  // Web browser on production Render or local dev with proxy
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1' || host.includes('onrender.com')) {
+      return '/api';
+    }
+  }
+  return `${PRODUCTION_SERVER_URL}/api`;
 };
 
 export const getApiRoot = (): string => {
@@ -42,9 +52,15 @@ export const getApiRoot = (): string => {
     return custom.trim().replace(/\/+$/, '').replace(/\/api$/, '');
   }
   if (isNativeApp()) {
-    return 'http://10.111.193.91:5000';
+    return PRODUCTION_SERVER_URL;
   }
-  return '';
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host.includes('onrender.com') || host === 'localhost' || host === '127.0.0.1') {
+      return '';
+    }
+  }
+  return PRODUCTION_SERVER_URL;
 };
 
 function getAdminToken(): string | null {
@@ -324,47 +340,18 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       } as unknown as T;
     }
 
-    // F) Admin Login Fallback (Offline College Admin Support)
-    if (endpoint === '/auth/admin/login' && options.body) {
-      try {
-        const parsed = JSON.parse(options.body as string);
-        const email = (parsed.email || '').toLowerCase().trim();
-        const pass = (parsed.password || '').trim();
-        const validEmails = ['dean@coer.edu', 'dean academic', 'admin@college.edu', 'dean'];
-        const validPasses = ['Dean@1111', 'Admin@123'];
-
-        if (validEmails.includes(email) && validPasses.includes(pass)) {
-          const offlineAdminToken = `college-admin-token-${Date.now()}`;
-          const offlineAdminUser = {
-            id: 'admin-offline',
-            username: 'Dean Academic',
-            email: 'Dean@coer.edu',
-            role: 'admin',
-            _isOfflineMode: true,
-          };
-          localStorage.setItem('college_admin_token', offlineAdminToken);
-          localStorage.setItem('college_admin_user', JSON.stringify(offlineAdminUser));
-          return {
-            success: true,
-            token: offlineAdminToken,
-            user: offlineAdminUser,
-            message: 'Admin signed in successfully (Offline Admin Console)',
-          } as unknown as T;
-        } else if (validEmails.includes(email)) {
-          throw new Error('Invalid administrator password. Please check your credentials.');
-        }
-      } catch (err: any) {
-        if (!err.message?.includes('fetch') && !err.message?.includes('Network')) {
-          throw err;
-        }
-      }
+    // F) Admin Login Fallback - Admin authentication requires live backend connection
+    if (endpoint === '/auth/admin/login') {
+      throw new Error('College server is unreachable. Admin authentication requires an active connection.');
     }
 
     // G) Admin Profile / Me Fallback
     if (endpoint === '/auth/admin/me') {
       const saved = localStorage.getItem('college_admin_user');
-      const user = saved ? JSON.parse(saved) : { id: 'admin-offline', username: 'Dean Academic', email: 'Dean@coer.edu', role: 'admin' };
-      return { user } as unknown as T;
+      if (saved) {
+        return { user: JSON.parse(saved) } as unknown as T;
+      }
+      throw new Error('Not authenticated');
     }
 
     // H) Admin Analytics Fallback
@@ -477,7 +464,7 @@ export async function checkServerHealth(customUrl?: string): Promise<{
   message?: string;
   clients?: any;
 }> {
-  const root = (customUrl || getApiRoot() || (isNativeApp() ? 'http://10.111.193.91:5000' : '')).replace(/\/+$/, '').replace(/\/api$/, '');
+  const root = (customUrl || getApiRoot() || (isNativeApp() ? PRODUCTION_SERVER_URL : '')).replace(/\/+$/, '').replace(/\/api$/, '');
   const target = `${root}/api/health`;
   const start = Date.now();
   try {
@@ -506,12 +493,45 @@ export async function checkServerHealth(customUrl?: string): Promise<{
 export const api = {
   // Auth
   adminLogin: (email: string, password: string) =>
-    request<{ token: string; user: any }>('/auth/admin/login', {
+    request<{ token: string; user: any; must_change_password?: boolean }>('/auth/admin/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
 
   adminMe: () => request<{ user: any }>('/auth/admin/me'),
+
+  adminChangePassword: (data: { currentPassword?: string; newPassword: string }) =>
+    request<{ success: boolean; message: string; user: any }>('/auth/admin/change-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Multi-Admin User Management (Super Admin only)
+  getAdminUsers: () =>
+    request<{ users: AdminUser[] }>('/admin/users'),
+
+  createAdminUser: (data: { username: string; email: string; password?: string; department: string; role?: string }) =>
+    request<{ success: boolean; user: AdminUser; temporaryPassword?: string; message: string }>('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateAdminUser: (id: number | string, data: { username?: string; department?: string; role?: string; status?: string }) =>
+    request<{ success: boolean; user: AdminUser; message: string }>(`/admin/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  resetAdminPassword: (id: number | string, temporaryPassword?: string) =>
+    request<{ success: boolean; temporaryPassword: string; message: string }>(`/admin/users/${id}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ temporaryPassword }),
+    }),
+
+  deleteAdminUser: (id: number | string) =>
+    request<{ success: boolean; message: string }>(`/admin/users/${id}`, {
+      method: 'DELETE',
+    }),
 
   studentLookup: (cu_id: string) =>
     request<{
@@ -719,6 +739,7 @@ export const api = {
         departments: Array.from(depts.entries()).map(([name, count]) => ({ name, student_count: count })),
       };
     }),
+  getDepartments: () => api.getAdminDepartments(),
 
   getAdminMessages: () =>
     request<{ messages: AdminMessage[] }>('/admin/messages').catch(() => {

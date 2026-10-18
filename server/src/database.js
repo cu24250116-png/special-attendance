@@ -88,8 +88,12 @@ class DatabaseService {
         username TEXT UNIQUE NOT NULL,
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'admin',
-        created_at TEXT NOT NULL
+        role TEXT NOT NULL DEFAULT 'hod',
+        department TEXT NOT NULL DEFAULT 'ALL',
+        status TEXT NOT NULL DEFAULT 'active',
+        must_change_password INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        created_by TEXT
       );
 
       CREATE TABLE IF NOT EXISTS students (
@@ -216,6 +220,10 @@ class DatabaseService {
     try { this.sqliteDb.run('ALTER TABLE assignments ADD COLUMN import_job_id TEXT'); } catch(e) {}
     try { this.sqliteDb.run('ALTER TABLE students ADD COLUMN import_job_id TEXT'); } catch(e) {}
     try { this.sqliteDb.run('ALTER TABLE students ADD COLUMN password_changed INTEGER DEFAULT 0'); } catch(e) {}
+    try { this.sqliteDb.run("ALTER TABLE users ADD COLUMN department TEXT DEFAULT 'ALL'"); } catch(e) {}
+    try { this.sqliteDb.run("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'"); } catch(e) {}
+    try { this.sqliteDb.run("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0"); } catch(e) {}
+    try { this.sqliteDb.run("ALTER TABLE users ADD COLUMN created_by TEXT"); } catch(e) {}
     try {
       this.sqliteDb.run(`
         CREATE TABLE IF NOT EXISTS admin_messages (
@@ -241,8 +249,12 @@ class DatabaseService {
           username VARCHAR(100) UNIQUE NOT NULL,
           email VARCHAR(255) UNIQUE NOT NULL,
           password_hash VARCHAR(255) NOT NULL,
-          role VARCHAR(50) NOT NULL DEFAULT 'admin',
-          created_at TIMESTAMPTZ NOT NULL
+          role VARCHAR(50) NOT NULL DEFAULT 'hod',
+          department VARCHAR(100) NOT NULL DEFAULT 'ALL',
+          status VARCHAR(50) NOT NULL DEFAULT 'active',
+          must_change_password INTEGER DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL,
+          created_by VARCHAR(255)
         );
 
         CREATE TABLE IF NOT EXISTS students (
@@ -354,6 +366,16 @@ class DatabaseService {
         CREATE INDEX IF NOT EXISTS idx_import_errors_job ON import_errors(job_id);
         CREATE INDEX IF NOT EXISTS idx_admin_messages_target ON admin_messages(target_type, target_value);
       `);
+
+      try { await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR(100) DEFAULT 'ALL'"); } catch(e) {}
+      try { await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active'"); } catch(e) {}
+      try { await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER DEFAULT 0"); } catch(e) {}
+      try { await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)"); } catch(e) {}
+      try { await client.query("ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS assignments_uploaded INTEGER DEFAULT 0"); } catch(e) {}
+      try { await client.query("ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS import_job_id VARCHAR(64)"); } catch(e) {}
+      try { await client.query("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS import_job_id VARCHAR(64)"); } catch(e) {}
+      try { await client.query("ALTER TABLE students ADD COLUMN IF NOT EXISTS import_job_id VARCHAR(64)"); } catch(e) {}
+      try { await client.query("ALTER TABLE students ADD COLUMN IF NOT EXISTS password_changed INTEGER DEFAULT 0"); } catch(e) {}
     } finally {
       client.release();
     }

@@ -127,7 +127,22 @@ export interface User {
   id: string;
   email: string;
   username: string;
-  role: 'admin' | 'student';
+  role: 'super_admin' | 'hod' | 'admin' | 'student';
+  department?: string;
+  status?: 'active' | 'disabled';
+  must_change_password?: boolean;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  username: string;
+  role: 'super_admin' | 'hod' | 'admin';
+  department: string;
+  status: 'active' | 'disabled';
+  must_change_password?: boolean;
+  created_at?: string;
+  created_by?: string;
 }
 
 export interface AdminMessage {

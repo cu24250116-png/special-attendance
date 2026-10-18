@@ -19,14 +19,13 @@
 3. Agar *"Install unknown apps"* ka popup aaye toh **Settings** par tap karein aur **"Allow from this source"** enable karein.
 4. **Install** par tap karein. App install ho jayegi!
 
-### Tarika B: Mobile Browser se Direct Download (Same Wi-Fi Network)
-1. Make sure aapka PC aur Mobile same Wi-Fi par connected hain.
-2. Mobile browser me open karein:
+### Tarika B: Mobile Browser se Direct Download (Live Cloud Server)
+1. Kisi bhi mobile browser me link open karein:
    ```
-   http://10.111.193.91:5000/download/SpecialAttendance.apk
+   https://college-special-attendance.onrender.com/download/SpecialAttendance.apk
    ```
    *(Local PC par: `http://localhost:5000/download/SpecialAttendance.apk`)*
-3. APK download ho jayegi, tap karke install karein.
+2. APK download ho jayegi, tap karke install karein.
 
 ---
 

@@ -18,10 +18,11 @@ import { AdminCloudSync } from './components/admin/AdminCloudSync';
 import { AdminImportHistory } from './components/admin/AdminImportHistory';
 import { AdminSettings } from './components/admin/AdminSettings';
 import { AdminMessages } from './components/admin/AdminMessages';
+import { AdminUserManagement } from './components/admin/AdminUserManagement';
 
 import { Student } from './types';
 import { api, isNativeApp, getApiBase } from './services/api';
-import { LayoutDashboard, Calendar, FileCheck2, User, Menu } from 'lucide-react';
+import { LayoutDashboard, Calendar, FileCheck2, User, Menu, Lock, AlertCircle } from 'lucide-react';
 
 
 export function App() {
@@ -183,6 +184,38 @@ export function App() {
     setAdminToken(null);
   };
 
+  // Force change password state (if must_change_password === true)
+  const [firstLoginNewPass, setFirstLoginNewPass] = useState('');
+  const [firstLoginConfirmPass, setFirstLoginConfirmPass] = useState('');
+  const [firstLoginLoading, setFirstLoginLoading] = useState(false);
+  const [firstLoginError, setFirstLoginError] = useState<string | null>(null);
+
+  const handleFirstLoginPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!firstLoginNewPass || firstLoginNewPass.length < 8) {
+      setFirstLoginError('Password must be at least 8 characters long.');
+      return;
+    }
+    if (firstLoginNewPass !== firstLoginConfirmPass) {
+      setFirstLoginError('Passwords do not match.');
+      return;
+    }
+    setFirstLoginLoading(true);
+    setFirstLoginError(null);
+    try {
+      await api.adminChangePassword({ newPassword: firstLoginNewPass });
+      const updatedUser = { ...adminUser, must_change_password: false };
+      setAdminUser(updatedUser);
+      localStorage.setItem('college_admin_user', JSON.stringify(updatedUser));
+      setFirstLoginNewPass('');
+      setFirstLoginConfirmPass('');
+    } catch (err: any) {
+      setFirstLoginError(err.message || 'Failed to update password.');
+    } finally {
+      setFirstLoginLoading(false);
+    }
+  };
+
   const studentNavTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'attendance', label: 'Attendance', icon: Calendar },
@@ -286,6 +319,7 @@ export function App() {
                     {adminTab === 'assignments' && 'Assignments'}
                     {adminTab === 'excel_import' && 'Excel Import'}
                     {adminTab === 'messages' && 'Student Notices'}
+                    {adminTab === 'user_management' && 'HOD & Admins'}
                     {adminTab === 'cloud_sync' && 'Cloud Sync'}
                     {adminTab === 'import_history' && 'Import History'}
                     {adminTab === 'settings' && 'Settings'}
@@ -301,20 +335,90 @@ export function App() {
                 onToggleCollapse={() => setIsAdminSidebarCollapsed(!isAdminSidebarCollapsed)}
                 isMobileOpen={isAdminMobileDrawerOpen}
                 onCloseMobile={() => setIsAdminMobileDrawerOpen(false)}
+                currentUser={adminUser}
               />
 
               {/* Admin Main View - Full Width on Mobile */}
               <div className="flex-1 overflow-y-auto p-3.5 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto overflow-x-hidden">
-                {adminTab === 'overview' && <AdminOverview onNavigateTab={setAdminTab} />}
+                {adminTab === 'overview' && <AdminOverview onNavigateTab={setAdminTab} currentUser={adminUser} />}
                 {adminTab === 'students' && <AdminStudents />}
                 {adminTab === 'attendance' && <AdminAttendance />}
                 {adminTab === 'assignments' && <AdminAssignments />}
-                {adminTab === 'excel_import' && <AdminExcelImport />}
+                {adminTab === 'excel_import' && <AdminExcelImport currentUser={adminUser} />}
                 {adminTab === 'messages' && <AdminMessages />}
+                {adminTab === 'user_management' && <AdminUserManagement currentUser={adminUser} />}
                 {adminTab === 'cloud_sync' && <AdminCloudSync />}
                 {adminTab === 'import_history' && <AdminImportHistory />}
-                {adminTab === 'settings' && <AdminSettings />}
+                {adminTab === 'settings' && <AdminSettings currentUser={adminUser} />}
               </div>
+
+              {/* Mandatory First-Login Password Setup Modal for Admins / HODs */}
+              {adminUser?.must_change_password && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fadeIn">
+                  <div className="glass-panel max-w-md w-full rounded-2xl p-6 border border-purple-500/50 shadow-2xl space-y-4">
+                    <div className="flex items-center space-x-3 text-purple-400">
+                      <div className="p-2.5 rounded-xl bg-purple-950/80 border border-purple-800/60">
+                        <Lock className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-bold text-white font-['Outfit']">Mandatory Security Setup</h3>
+                        <p className="text-xs text-slate-400">Please choose a permanent password for your administrator account.</p>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300">
+                      Logged in as: <strong>{adminUser.username}</strong> ({adminUser.email})<br />
+                      Department: <span className="font-mono text-sky-400">{adminUser.department || 'ALL'}</span>
+                    </div>
+
+                    {firstLoginError && (
+                      <div className="p-3 rounded-xl bg-red-950/60 border border-red-800/60 text-red-200 text-xs flex items-start space-x-2">
+                        <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                        <span>{firstLoginError}</span>
+                      </div>
+                    )}
+
+                    <form onSubmit={handleFirstLoginPasswordSubmit} className="space-y-3.5 text-xs">
+                      <div>
+                        <label className="block font-semibold text-slate-300 mb-1">
+                          New Permanent Password (min 8 characters)
+                        </label>
+                        <input
+                          type="password"
+                          value={firstLoginNewPass}
+                          onChange={(e) => setFirstLoginNewPass(e.target.value)}
+                          placeholder="••••••••••••"
+                          className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          required
+                          autoFocus
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-300 mb-1">
+                          Confirm New Password
+                        </label>
+                        <input
+                          type="password"
+                          value={firstLoginConfirmPass}
+                          onChange={(e) => setFirstLoginConfirmPass(e.target.value)}
+                          placeholder="••••••••••••"
+                          className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                          required
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={firstLoginLoading || !firstLoginNewPass || !firstLoginConfirmPass}
+                        className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-semibold shadow-lg shadow-purple-900/30 transition disabled:opacity-50"
+                      >
+                        {firstLoginLoading ? 'Updating Password...' : 'Save & Continue to Console'}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              )}
             </div>
           )
         )}

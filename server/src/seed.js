@@ -18,21 +18,40 @@ export async function seedDatabase() {
   await db.init();
   const now = new Date().toISOString();
 
-  // 1. Create or maintain Dean Admin account (Dean@coer.edu / Dean@1111)
-  const adminEmail = process.env.ADMIN_DEFAULT_EMAIL || 'Dean@coer.edu';
-  const adminPassword = process.env.ADMIN_DEFAULT_PASSWORD || 'Dean@1111';
-  const passwordHash = hashPassword(adminPassword);
+  // 1. Initialize or maintain primary Super Admin account securely from environment variables
+  const superAdminEmail = (process.env.SUPER_ADMIN_EMAIL || process.env.ADMIN_DEFAULT_EMAIL || 'Dean@coer.edu').trim();
+  const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || process.env.ADMIN_DEFAULT_PASSWORD || 'Dean@1111';
 
-  const existingDean = await db.get('SELECT * FROM users WHERE LOWER(email) = LOWER(?)', [adminEmail]);
-  if (!existingDean) {
+  // Check if primary super admin or any super admin already exists
+  const existingSuperAdmin = await db.get(
+    "SELECT * FROM users WHERE LOWER(email) = LOWER(?) OR role = 'super_admin' LIMIT 1",
+    [superAdminEmail]
+  );
+
+  if (!existingSuperAdmin) {
+    const passwordHash = hashPassword(superAdminPassword);
     await db.run(`
-      INSERT INTO users (id, username, email, password_hash, role, created_at)
-      VALUES (?, ?, ?, ?, 'admin', ?)
-    `, [uuidv4(), 'Dean Academic', adminEmail, passwordHash, now]);
-    console.log(`Initialized primary admin user: ${adminEmail} (password: ${adminPassword})`);
+      INSERT INTO users (id, username, email, password_hash, role, department, status, must_change_password, created_at, created_by)
+      VALUES (?, ?, ?, ?, 'super_admin', 'ALL', 'active', 0, ?, 'system_bootstrap')
+    `, [uuidv4(), 'Dean Academic / Super Admin', superAdminEmail, passwordHash, now]);
+    console.log(`Primary Super Admin account initialized: ${superAdminEmail}`);
   } else {
-    await db.run('UPDATE users SET password_hash = ? WHERE LOWER(email) = LOWER(?)', [passwordHash, adminEmail]);
-    console.log(`Verified and updated admin password for: ${adminEmail}`);
+    // Ensure the primary account has super_admin role and ALL departments
+    if (existingSuperAdmin.role !== 'super_admin' || existingSuperAdmin.department !== 'ALL') {
+      await db.run(
+        "UPDATE users SET role = 'super_admin', department = 'ALL', status = 'active' WHERE id = ?",
+        [existingSuperAdmin.id]
+      );
+    }
+
+    // Optional environment variable override for emergency password recovery
+    if (process.env.SUPER_ADMIN_PASSWORD_RESET && process.env.SUPER_ADMIN_PASSWORD_RESET.trim()) {
+      const resetHash = hashPassword(process.env.SUPER_ADMIN_PASSWORD_RESET.trim());
+      await db.run('UPDATE users SET password_hash = ? WHERE id = ?', [resetHash, existingSuperAdmin.id]);
+      console.log(`Super Admin password reset via environment variable.`);
+    }
+
+    console.log(`Primary Super Admin account verified: ${existingSuperAdmin.email}`);
   }
 
   // Remove any legacy admin placeholder

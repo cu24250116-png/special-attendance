@@ -21,6 +21,7 @@ export type AdminTab =
   | 'assignments'
   | 'excel_import'
   | 'messages'
+  | 'user_management'
   | 'cloud_sync'
   | 'import_history'
   | 'settings';
@@ -32,6 +33,7 @@ interface AdminNavDrawerProps {
   onToggleCollapse: () => void;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
+  currentUser?: any;
 }
 
 export const AdminNavDrawer: React.FC<AdminNavDrawerProps> = ({
@@ -41,7 +43,10 @@ export const AdminNavDrawer: React.FC<AdminNavDrawerProps> = ({
   onToggleCollapse,
   isMobileOpen = false,
   onCloseMobile = () => {},
+  currentUser,
 }) => {
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+
   const menuItems: { id: AdminTab; label: string; icon: any; badge?: string }[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'students', label: 'Students', icon: Users },
@@ -49,6 +54,9 @@ export const AdminNavDrawer: React.FC<AdminNavDrawerProps> = ({
     { id: 'assignments', label: 'Assignments', icon: FileCheck2 },
     { id: 'excel_import', label: 'Excel Import', icon: FileSpreadsheet, badge: 'Core' },
     { id: 'messages', label: 'Student Notices', icon: Megaphone, badge: 'New' },
+    ...(isSuperAdmin
+      ? [{ id: 'user_management' as AdminTab, label: 'HOD & Admins', icon: ShieldCheck, badge: 'Super' }]
+      : []),
     { id: 'cloud_sync', label: 'Cloud Sync', icon: Cloud, badge: 'Auto' },
     { id: 'import_history', label: 'Import History', icon: History },
     { id: 'settings', label: 'Settings', icon: Settings },

@@ -41,12 +41,15 @@ async function runTests() {
     if (data.status !== 'online') throw new Error('Status is not online');
   });
 
+  const testAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@college.edu';
+  const testAdminPassword = process.env.SUPER_ADMIN_PASSWORD || 'Admin@123';
+
   // 2. Admin Authentication
-  await test('Admin login with default credentials returns JWT token', async () => {
+  await test('Admin login returns JWT token', async () => {
     const res = await fetch(`${API_BASE}/auth/admin/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'admin@college.edu', password: 'Admin@123' }),
+      body: JSON.stringify({ email: testAdminEmail, password: testAdminPassword }),
     });
     if (!res.ok) throw new Error(`Admin login failed: ${res.status}`);
     const data = await res.json();

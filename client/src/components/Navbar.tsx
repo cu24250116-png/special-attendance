@@ -118,6 +118,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             </div>
 
+            {/* Admin Role / Dept Pill */}
+            {currentView === 'admin' && adminUser && (
+              <div className="hidden lg:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 text-[11px] font-mono">
+                <span className={`w-1.5 h-1.5 rounded-full ${adminUser.role === 'super_admin' ? 'bg-purple-400' : 'bg-indigo-400'}`} />
+                <span className="text-slate-200 font-semibold truncate max-w-[140px]">
+                  {adminUser.role === 'super_admin' ? 'Super Admin' : `HOD • ${adminUser.department || 'Dept'}`}
+                </span>
+              </div>
+            )}
+
             {/* Logout Buttons */}
             {currentView === 'student' && studentCuId && (
               <button
