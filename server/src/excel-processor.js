@@ -218,9 +218,9 @@ export class ExcelProcessor {
   static formatDate(val) {
     if (!val) return '';
     if (val instanceof Date) {
-      const y = val.getFullYear();
-      const m = String(val.getMonth() + 1).padStart(2, '0');
-      const d = String(val.getDate()).padStart(2, '0');
+      const y = val.getUTCFullYear();
+      const m = String(val.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(val.getUTCDate()).padStart(2, '0');
       return `${y}-${m}-${d}`;
     }
     const str = String(val).trim();
@@ -228,9 +228,9 @@ export class ExcelProcessor {
     // Excel numeric date serial
     if (!isNaN(str) && Number(str) > 20000 && Number(str) < 60000) {
       const date = new Date(Math.round((Number(str) - 25569) * 86400 * 1000));
-      const y = date.getFullYear();
-      const m = String(date.getMonth() + 1).padStart(2, '0');
-      const d = String(date.getDate()).padStart(2, '0');
+      const y = date.getUTCFullYear();
+      const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(date.getUTCDate()).padStart(2, '0');
       return `${y}-${m}-${d}`;
     }
 
