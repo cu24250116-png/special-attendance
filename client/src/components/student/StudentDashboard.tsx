@@ -37,7 +37,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   lastSyncNotice,
   onRefreshStudent,
 }) => {
+  const [currentStudent, setCurrentStudent] = useState<Student>(student);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [specialAttendance, setSpecialAttendance] = useState<SpecialClassAttendance | null>(
     student.special_class_attendance || null
   );
@@ -46,8 +49,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   );
   const [latestFileName, setLatestFileName] = useState<string>('');
 
-  // Synchronize specialAttendance and displayLastUpdated whenever student prop updates
+  // Synchronize specialAttendance, currentStudent and displayLastUpdated whenever student prop updates
   useEffect(() => {
+    setCurrentStudent(student);
     if (student.special_class_attendance) {
       setSpecialAttendance(student.special_class_attendance);
     }
@@ -57,7 +61,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         return new Date(student.last_updated) > new Date(prev) ? student.last_updated : prev;
       });
     }
-  }, [student.special_class_attendance, student.last_updated]);
+  }, [student]);
 
   // Admin / HOD Broadcast Messages State
   const [messages, setMessages] = useState<AdminMessage[]>([]);
@@ -77,10 +81,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
     const fetchFreshData = async () => {
       try {
         const [attRes, profRes] = await Promise.all([
-          api.getStudentAttendance(student.cu_id).catch(() => null),
-          api.getStudentProfile(student.cu_id).catch(() => null),
+          api.getStudentAttendance(student.cu_id),
+          api.getStudentProfile(student.cu_id),
         ]);
         if (!mounted) return;
+        setIsOffline(false);
+        setServerError(null);
+        if (profRes?.student) {
+          setCurrentStudent(profRes.student);
+        }
         if (attRes?.specialClassAttendance) {
           setSpecialAttendance(attRes.specialClassAttendance);
         }
@@ -100,7 +109,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         if (filename) {
           setLatestFileName(filename);
         }
-      } catch (e) {}
+      } catch (e: any) {
+        if (!mounted) return;
+        setIsOffline(true);
+        setServerError(e.message || 'Unable to connect to live college server.');
+      }
     };
 
     fetchFreshData();
@@ -176,14 +189,20 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const handleRefresh = async () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
+    setServerError(null);
     try {
       if (onRefreshStudent) {
         await onRefreshStudent();
       }
       const [attRes, profRes] = await Promise.all([
-        api.getStudentAttendance(student.cu_id).catch(() => null),
-        api.getStudentProfile(student.cu_id).catch(() => null),
+        api.getStudentAttendance(student.cu_id),
+        api.getStudentProfile(student.cu_id),
       ]);
+      setIsOffline(false);
+      setServerError(null);
+      if (profRes?.student) {
+        setCurrentStudent(profRes.student);
+      }
       if (attRes?.specialClassAttendance) {
         setSpecialAttendance(attRes.specialClassAttendance);
       }
@@ -203,14 +222,16 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       if (filename) {
         setLatestFileName(filename);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Refresh error:', e);
+      setIsOffline(true);
+      setServerError(e.message || 'Failed to sync with live college server.');
     } finally {
       setTimeout(() => setIsRefreshing(false), 500);
     }
   };
 
-  const percentage = Math.round(student.overall_percentage * 10) / 10;
+  const percentage = Math.round((currentStudent.overall_percentage ?? student.overall_percentage ?? 0) * 10) / 10;
   const isSafe = percentage >= 75;
   const isWarning = percentage >= 65 && percentage < 75;
 
@@ -256,6 +277,61 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   return (
     <div className="w-full max-w-full space-y-5 animate-fadeIn pb-24 md:pb-8 overflow-x-hidden">
+      {/* Live Server Mode vs Offline Stale-Data Indicator Bar */}
+      {isOffline || serverError ? (
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-950/80 border border-amber-500/50 shadow-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 animate-fadeIn">
+          <div className="flex items-start space-x-3">
+            <div className="p-2 rounded-xl bg-amber-900/50 border border-amber-600/40 text-amber-300 flex-shrink-0 mt-0.5">
+              <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                  Offline Mode • Stale Cached Records
+                </span>
+                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-900/80 text-amber-200 border border-amber-700/60 uppercase">
+                  Cached
+                </span>
+              </div>
+              <p className="text-[11px] sm:text-xs text-amber-200/90 mt-1 leading-relaxed">
+                {serverError || 'Live college server is unreachable. Attendance records displayed below are from a previous session and may be stale.'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="self-start sm:self-auto px-3.5 py-1.5 rounded-xl bg-amber-800/80 hover:bg-amber-700/80 text-white text-xs font-semibold flex items-center space-x-2 flex-shrink-0 transition shadow-md active:scale-95 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>{isRefreshing ? 'Reconnecting...' : 'Reconnect Now'}</span>
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between text-xs px-1 text-slate-400">
+          <div className="flex items-center space-x-2">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span className="text-emerald-400 font-semibold text-[11px] uppercase tracking-wider">
+              Live Server Mode
+            </span>
+            <span className="text-slate-600">•</span>
+            <span className="text-[11px] text-slate-400">Production Cloud Sync (Render 24/7)</span>
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="flex items-center space-x-1.5 text-sky-400 hover:text-sky-300 font-medium text-[11px] transition"
+            title="Fetch latest updates from college administrator"
+          >
+            <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>{isRefreshing ? 'Checking updates...' : 'Check for Updates'}</span>
+          </button>
+        </div>
+      )}
+
       {/* Realtime Live Update Banner */}
       {lastSyncNotice && (
         <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-blue-950/80 to-slate-900 border border-emerald-500/50 shadow-xl flex items-center justify-between animate-bounceOnce">
@@ -286,27 +362,27 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           <div>
             <div className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-blue-500/20 text-sky-300 border border-blue-400/30 text-[11px] font-semibold uppercase tracking-wider mb-2">
               <GraduationCap className="w-3.5 h-3.5 text-sky-400" />
-              <span>{student.course} • {student.branch}</span>
+              <span>{currentStudent.course} • {currentStudent.branch}</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight font-['Outfit'] drop-shadow-sm">
-              {student.student_name}
+              {currentStudent.student_name}
             </h1>
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-2.5">
               <span className="px-2.5 py-1 rounded-lg bg-indigo-950/80 text-indigo-200 text-xs font-mono font-semibold border border-indigo-700/60 shadow-sm">
-                CU ID: {student.cu_id}
+                CU ID: {currentStudent.cu_id}
               </span>
-              {student.roll_number && (
+              {currentStudent.roll_number && (
                 <span className="px-2.5 py-1 rounded-lg bg-sky-950/80 text-sky-300 text-xs font-mono font-medium border border-sky-700/60 shadow-sm">
-                  Roll: {student.roll_number}
+                  Roll: {currentStudent.roll_number}
                 </span>
               )}
-              {student.father_name && (
+              {currentStudent.father_name && (
                 <span className="px-2.5 py-1 rounded-lg bg-slate-900/90 text-slate-200 text-xs font-medium border border-slate-700">
-                  Father: {student.father_name}
+                  Father: {currentStudent.father_name}
                 </span>
               )}
               <span className="px-2.5 py-1 rounded-lg bg-purple-950/70 text-purple-200 text-xs font-medium border border-purple-700/50">
-                Sem {student.semester} • Sec {student.section}
+                Sem {currentStudent.semester} • Sec {currentStudent.section}
               </span>
             </div>
           </div>
@@ -432,7 +508,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
                   <span className="font-medium">Total Classes</span>
                 </div>
-                <p className="text-2xl font-black text-white font-mono">{student.total_sessions}</p>
+                <p className="text-2xl font-black text-white font-mono">{currentStudent.total_sessions}</p>
                 <p className="text-[10px] text-blue-300/80">Scheduled</p>
               </div>
 
@@ -442,7 +518,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                   <span className="font-medium">Present</span>
                 </div>
-                <p className="text-2xl font-black text-emerald-300 font-mono">{student.present_sessions}</p>
+                <p className="text-2xl font-black text-emerald-300 font-mono">{currentStudent.present_sessions}</p>
                 <p className="text-[10px] text-emerald-400/80">Attended</p>
               </div>
 
@@ -452,7 +528,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   <XCircle className="w-3.5 h-3.5 text-rose-400" />
                   <span className="font-medium">Absent</span>
                 </div>
-                <p className="text-2xl font-black text-rose-300 font-mono">{student.absent_sessions}</p>
+                <p className="text-2xl font-black text-rose-300 font-mono">{currentStudent.absent_sessions}</p>
                 <p className="text-[10px] text-rose-400/80">Missed</p>
               </div>
 

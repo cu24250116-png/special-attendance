@@ -368,7 +368,18 @@ export class ExcelProcessor {
       const existingStudentsList = await tx.all('SELECT cu_id, password_hash, roll_number, father_name, course, branch, semester, section, email, phone FROM students');
       const existingStudentsMap = new Map();
       for (const s of existingStudentsList) {
-        if (s.cu_id) existingStudentsMap.set(String(s.cu_id).toUpperCase().trim(), s);
+        if (s.cu_id) {
+          const upperCu = String(s.cu_id).toUpperCase().trim();
+          existingStudentsMap.set(upperCu, s);
+          const strippedCu = upperCu.replace(/^CU[-_ ]*/i, '');
+          if (strippedCu) existingStudentsMap.set(strippedCu, s);
+        }
+        if (s.roll_number) {
+          const upperRoll = String(s.roll_number).toUpperCase().trim();
+          existingStudentsMap.set(upperRoll, s);
+          const strippedRoll = upperRoll.replace(/^CU[-_ ]*/i, '');
+          if (strippedRoll) existingStudentsMap.set(strippedRoll, s);
+        }
       }
 
       const existingAttList = await tx.all('SELECT id, cu_id, attendance_date FROM attendance_records');
@@ -525,8 +536,15 @@ export class ExcelProcessor {
           finalPercentage = totalHeld > 0 ? Math.round(((totalPres / totalHeld) * 100) * 10) / 10 : 0;
         }
 
-        // CRITICAL FIX: Upsert student record FIRST so Foreign Key constraints are satisfied before child attendance/assignment records
-        const existingStudent = existingStudentsMap.get(cuId);
+        const strippedCu = cuId.replace(/^CU[-_ ]*/i, '');
+        const existingStudent = existingStudentsMap.get(cuId) ||
+          (strippedCu ? existingStudentsMap.get(strippedCu) : null) ||
+          (mapped.roll_number ? existingStudentsMap.get(String(mapped.roll_number).toUpperCase().trim()) : null);
+
+        if (existingStudent && existingStudent.cu_id) {
+          cuId = existingStudent.cu_id;
+        }
+
         if (existingStudent) {
           await tx.run(`
             UPDATE students SET
@@ -836,31 +854,34 @@ export class ExcelProcessor {
         assignmentsUpdated++;
       }
 
-      // 4. Re-synchronize authoritative attendance totals and last_updated for all affected students
+      // 4. Update last_updated timestamp and preserve semester attendance totals
       for (const cuId of affectedCuIds) {
-        const attRows = await tx.all('SELECT total_sessions, present_sessions, absent_sessions FROM attendance_records WHERE cu_id = ?', [cuId]);
-        if (attRows && attRows.length > 0) {
-          let tot = 0;
-          let pres = 0;
-          let abs = 0;
-          for (const r of attRows) {
-            tot += Number(r.total_sessions || 0);
-            pres += Number(r.present_sessions || 0);
-            abs += Number(r.absent_sessions || 0);
+        const studentRec = await tx.get('SELECT total_sessions FROM students WHERE cu_id = ?', [cuId]);
+        if (!studentRec || !studentRec.total_sessions || Number(studentRec.total_sessions) <= 0) {
+          const attRows = await tx.all('SELECT total_sessions, present_sessions, absent_sessions FROM attendance_records WHERE cu_id = ?', [cuId]);
+          if (attRows && attRows.length > 0) {
+            let tot = 0;
+            let pres = 0;
+            let abs = 0;
+            for (const r of attRows) {
+              tot += Number(r.total_sessions || 0);
+              pres += Number(r.present_sessions || 0);
+              abs += Number(r.absent_sessions || 0);
+            }
+            const pct = tot > 0 ? Math.round(((pres / tot) * 100) * 10) / 10 : 0;
+            await tx.run(`
+              UPDATE students SET
+                overall_percentage = ?,
+                total_sessions = ?,
+                present_sessions = ?,
+                absent_sessions = ?,
+                last_updated = ?
+              WHERE cu_id = ?
+            `, [pct, tot, pres, abs, now, cuId]);
+            continue;
           }
-          const pct = tot > 0 ? Math.round(((pres / tot) * 100) * 10) / 10 : 0;
-          await tx.run(`
-            UPDATE students SET
-              overall_percentage = ?,
-              total_sessions = ?,
-              present_sessions = ?,
-              absent_sessions = ?,
-              last_updated = ?
-            WHERE cu_id = ?
-          `, [pct, tot, pres, abs, now, cuId]);
-        } else {
-          await tx.run('UPDATE students SET last_updated = ? WHERE cu_id = ?', [now, cuId]);
         }
+        await tx.run('UPDATE students SET last_updated = ? WHERE cu_id = ?', [now, cuId]);
       }
 
       // 5. Save Import Job Record

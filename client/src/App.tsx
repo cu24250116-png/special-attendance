@@ -21,7 +21,7 @@ import { AdminMessages } from './components/admin/AdminMessages';
 import { AdminUserManagement } from './components/admin/AdminUserManagement';
 
 import { Student } from './types';
-import { api, isNativeApp, getApiBase } from './services/api';
+import { api, isNativeApp, getApiBase, invalidateStudentCaches } from './services/api';
 import { LayoutDashboard, Calendar, FileCheck2, User, Menu, Lock, AlertCircle } from 'lucide-react';
 
 
@@ -37,7 +37,14 @@ export function App() {
   const [studentToken, setStudentToken] = useState<string | null>(() => {
     return localStorage.getItem('college_student_token');
   });
-  const [studentData, setStudentData] = useState<Student | null>(null);
+  const [studentData, setStudentData] = useState<Student | null>(() => {
+    try {
+      const saved = localStorage.getItem('college_student_cached_data');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [studentTab, setStudentTab] = useState<'dashboard' | 'attendance' | 'assignments' | 'profile'>('dashboard');
 
   // Admin State
@@ -62,10 +69,14 @@ export function App() {
         const importTime = res.latestImport?.created_at;
         const studentTime = res.student.last_updated;
         const newest = (importTime && (!studentTime || new Date(importTime) > new Date(studentTime))) ? importTime : studentTime;
-        setStudentData({
+        const updated = {
           ...res.student,
           last_updated: newest || studentTime,
-        });
+        };
+        setStudentData(updated);
+        try {
+          localStorage.setItem('college_student_cached_data', JSON.stringify(updated));
+        } catch (e) {}
       }
     } catch (err) {
       console.error('Failed to fetch student profile:', err);
@@ -104,6 +115,7 @@ export function App() {
             const data = JSON.parse(event.data);
             const time = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
             setLastSyncNotice(`Latest Excel records synchronized from college server at ${time} IST`);
+            invalidateStudentCaches(studentCuId || undefined);
             window.dispatchEvent(new CustomEvent('college_data_updated', { detail: data }));
             if (studentCuId) {
               fetchCurrentStudent();
@@ -118,6 +130,7 @@ export function App() {
             if (studentCuId && data.cuId === studentCuId.toUpperCase().trim()) {
               const time = new Date().toLocaleTimeString();
               setLastSyncNotice(`Your attendance record was directly updated by college admin at ${time}`);
+              invalidateStudentCaches(studentCuId);
               if (data.student) {
                 setStudentData(data.student);
               } else {
@@ -179,10 +192,14 @@ export function App() {
 
   // Handlers for Student
   const handleStudentLoginSuccess = (cuId: string, token: string, initialStudent?: Student) => {
+    invalidateStudentCaches(cuId);
     setStudentCuId(cuId);
     setStudentToken(token);
     if (initialStudent) {
       setStudentData(initialStudent);
+      try {
+        localStorage.setItem('college_student_cached_data', JSON.stringify(initialStudent));
+      } catch (e) {}
     }
     fetchCurrentStudent(cuId);
   };
@@ -190,6 +207,8 @@ export function App() {
   const handleStudentLogout = () => {
     localStorage.removeItem('college_student_cuid');
     localStorage.removeItem('college_student_token');
+    localStorage.removeItem('college_student_cached_data');
+    invalidateStudentCaches();
     setStudentCuId(null);
     setStudentToken(null);
     setStudentData(null);

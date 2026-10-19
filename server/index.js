@@ -841,13 +841,18 @@ app.get('/api/students/:cu_id', requireStudentOrAdmin, async (req, res) => {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
 
+  const hasMasterSessions = Number(student.total_sessions || 0) > 0;
+  const resolvedOverallPct = hasMasterSessions
+    ? (student.overall_percentage ?? 0)
+    : (liveTot > 0 ? livePct : (student.overall_percentage ?? 0));
+
   res.json({
     student: {
       ...student,
-      overall_percentage: livePct,
-      total_sessions: liveTot > 0 ? liveTot : (student.total_sessions || 0),
-      present_sessions: liveTot > 0 ? livePres : (student.present_sessions || 0),
-      absent_sessions: liveTot > 0 ? liveAbs : (student.absent_sessions || 0),
+      overall_percentage: resolvedOverallPct,
+      total_sessions: hasMasterSessions ? student.total_sessions : (liveTot || 0),
+      present_sessions: hasMasterSessions ? student.present_sessions : (livePres || 0),
+      absent_sessions: hasMasterSessions ? student.absent_sessions : (liveAbs || 0),
       last_updated: effectiveLastUpdated,
       special_class_attendance: specialClassAttendance,
     },

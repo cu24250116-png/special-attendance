@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { UserCheck, Lock, Eye, EyeOff, ArrowRight, School, AlertCircle, Info, Smartphone, Key, CheckCircle2, ArrowLeft } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { UserCheck, Lock, Eye, EyeOff, ArrowRight, School, AlertCircle, Info, Smartphone, Key, CheckCircle2, ArrowLeft, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { api, isNativeApp } from '../../services/api';
 
 interface StudentWelcomeProps {
@@ -13,6 +13,46 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Live Server Health & Connection State
+  const [serverStatus, setServerStatus] = useState<{
+    online: boolean | null;
+    checking: boolean;
+    latencyMs?: number;
+    message?: string;
+  }>({
+    online: null,
+    checking: true,
+  });
+
+  const checkConnection = async () => {
+    setServerStatus(prev => ({ ...prev, checking: true }));
+    try {
+      const health = await api.checkServerHealth();
+      setServerStatus({
+        online: health.online,
+        checking: false,
+        latencyMs: health.latencyMs,
+        message: health.message,
+      });
+      return health;
+    } catch {
+      setServerStatus({
+        online: false,
+        checking: false,
+        message: 'College cloud server is unreachable',
+      });
+      return { online: false };
+    }
+  };
+
+  useEffect(() => {
+    checkConnection();
+    const interval = setInterval(() => {
+      checkConnection();
+    }, 25000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Change Password state
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -38,6 +78,14 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
     if (!targetPassword) {
       setError('Please enter your Password (default is your Student ID / CU ID).');
       return;
+    }
+
+    if (serverStatus.online === false) {
+      const fresh = await checkConnection();
+      if (!fresh.online) {
+        setError('College server is currently unreachable. Please check your internet connection.');
+        return;
+      }
     }
 
     setError(null);
@@ -134,6 +182,63 @@ export const StudentWelcome: React.FC<StudentWelcomeProps> = ({ onLoginSuccess }
             <p className="text-sm text-slate-400 mt-2">
               Sign in with your Student ID and Password to check your real-time attendance and special class records.
             </p>
+          </div>
+
+          {/* Live Server Mode vs Offline Mode Status Card */}
+          <div className="mb-6">
+            {serverStatus.checking && serverStatus.online === null ? (
+              <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 text-xs flex items-center justify-between text-slate-400">
+                <div className="flex items-center space-x-2">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-sky-400" />
+                  <span className="text-[11px]">Connecting to College Production Cloud...</span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-mono">Render 24/7</span>
+              </div>
+            ) : serverStatus.online ? (
+              <div className="p-2.5 px-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs flex items-center justify-between shadow-sm">
+                <div className="flex items-center space-x-2.5">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                  </span>
+                  <div>
+                    <span className="text-emerald-300 font-bold text-[11px] tracking-wide uppercase">
+                      Live Server Mode
+                    </span>
+                    <span className="text-emerald-400/70 text-[10px] ml-1.5 hidden sm:inline">
+                      • Connected {serverStatus.latencyMs ? `(${serverStatus.latencyMs}ms)` : ''}
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-900/60 text-emerald-200 border border-emerald-700/50">
+                  Cloud Live
+                </span>
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-xl bg-rose-950/70 border border-rose-600/50 text-xs flex items-start justify-between shadow-lg animate-fadeIn">
+                <div className="flex items-start space-x-2.5 min-w-0">
+                  <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-rose-200 font-bold text-[11px] uppercase tracking-wide">
+                      Offline Mode • College Server Unreachable
+                    </p>
+                    <p className="text-[11px] text-rose-300/80 mt-0.5 leading-tight">
+                      Cannot reach production server. Student records and updates cannot be loaded offline.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => checkConnection()}
+                  disabled={serverStatus.checking}
+                  className="ml-2 px-2.5 py-1 rounded-lg bg-rose-900/80 hover:bg-rose-800 text-rose-100 text-[11px] font-semibold flex items-center space-x-1 flex-shrink-0 border border-rose-700/60 transition disabled:opacity-50"
+                  title="Retry connection"
+                >
+                  <RefreshCw className={`w-3 h-3 ${serverStatus.checking ? 'animate-spin' : ''}`} />
+                  <span>{serverStatus.checking ? 'Checking...' : 'Retry'}</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {successMessage && (

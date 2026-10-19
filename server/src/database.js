@@ -33,9 +33,7 @@ class DatabaseService {
 
   endBatch() {
     this.batchMode = false;
-    if (this.hasPendingSave) {
-      this.saveSqlite();
-    }
+    this.saveSqlite();
   }
 
   async init() {

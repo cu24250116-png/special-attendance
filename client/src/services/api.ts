@@ -41,7 +41,11 @@ export const getApiBase = (): string => {
   // Web browser on production Render or local dev with proxy
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1' || host.includes('onrender.com')) {
+    const port = window.location.port;
+    if ((host === 'localhost' || host === '127.0.0.1') && (port === '5173' || port === '5000')) {
+      return '/api';
+    }
+    if (host.includes('onrender.com')) {
       return '/api';
     }
   }
@@ -54,7 +58,11 @@ export const getApiRoot = (): string => {
   }
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
-    if (host.includes('onrender.com') || host === 'localhost' || host === '127.0.0.1') {
+    const port = window.location.port;
+    if ((host === 'localhost' || host === '127.0.0.1') && (port === '5173' || port === '5000')) {
+      return '';
+    }
+    if (host.includes('onrender.com')) {
       return '';
     }
   }
@@ -86,6 +94,29 @@ export function getFromOfflineCache<T>(key: string): T | null {
     return raw ? JSON.parse(raw) : null;
   } catch (e) {
     return null;
+  }
+}
+
+// Refresh or invalidate relevant client caches after successful login and dataset updates
+export function invalidateStudentCaches(cuId?: string) {
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (
+        key.startsWith(CACHE_PREFIX) ||
+        (cuId && key.toUpperCase().includes(cuId.toUpperCase())) ||
+        key === 'college_student_cached_data'
+      ) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const k of keysToRemove) {
+      localStorage.removeItem(k);
+    }
+  } catch (e) {
+    console.warn('Failed to clear student caches:', e);
   }
 }
 
@@ -304,13 +335,13 @@ export async function checkServerHealth(customUrl?: string): Promise<{
   message?: string;
   clients?: any;
 }> {
-  const root = (customUrl || getApiRoot() || (isNativeApp() ? PRODUCTION_SERVER_URL : '')).replace(/\/+$/, '').replace(/\/api$/, '');
+  const root = (customUrl || getApiRoot() || PRODUCTION_SERVER_URL).replace(/\/+$/, '').replace(/\/api$/, '');
   const target = `${root}/api/health`;
   const start = Date.now();
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
-    const res = await fetch(target, { signal: controller.signal });
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(target, { signal: controller.signal, cache: 'no-store' });
     clearTimeout(timeout);
     if (res.ok) {
       const data = await res.json();
@@ -401,8 +432,10 @@ export const api = {
       body: JSON.stringify({ cu_id, otp }),
     }),
 
-  studentLogin: (cu_id: string, password: string) =>
-    request<{
+  studentLogin: async (cu_id: string, password: string) => {
+    // Invalidate stale caches before attempting fresh authentication
+    invalidateStudentCaches(cu_id);
+    const result = await request<{
       success: boolean;
       token: string;
       student: Student;
@@ -410,7 +443,14 @@ export const api = {
     }>('/auth/student/login', {
       method: 'POST',
       body: JSON.stringify({ cu_id, password }),
-    }),
+    });
+    if (result && result.student) {
+      try {
+        localStorage.setItem('college_student_cached_data', JSON.stringify(result.student));
+      } catch (e) {}
+    }
+    return result;
+  },
 
   changeStudentPassword: (cu_id: string, current_password: string, new_password: string) =>
     request<{ success: boolean; message: string }>('/auth/student/change-password', {
