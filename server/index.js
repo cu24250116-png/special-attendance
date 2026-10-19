@@ -92,9 +92,11 @@ app.get('/api/health', async (req, res) => {
 
 // System sync status with latest import job information
 app.get('/api/system/sync-status', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
   try {
     const latestImport = await db.get(
-      'SELECT id, filename, created_at, status, students_updated, records_updated FROM import_jobs ORDER BY created_at DESC LIMIT 1'
+      'SELECT id, filename, created_at, status, students_updated, attendance_updated, assignments_updated FROM import_jobs ORDER BY created_at DESC LIMIT 1'
     );
     const studentCountRow = await db.get('SELECT COUNT(*) as count FROM students');
     const recordCountRow = await db.get('SELECT COUNT(*) as count FROM attendance_records');
@@ -807,9 +809,29 @@ app.get('/api/students/:cu_id', requireStudentOrAdmin, async (req, res) => {
     'SELECT id, filename, created_at, status FROM import_jobs ORDER BY created_at DESC LIMIT 1'
   );
 
+  let liveTot = 0;
+  let livePres = 0;
+  let liveAbs = 0;
+  for (const r of allRecords) {
+    liveTot += Number(r.total_sessions || 0);
+    livePres += Number(r.present_sessions || 0);
+    liveAbs += Number(r.absent_sessions || 0);
+  }
+  const livePct = liveTot > 0 ? Math.round(((livePres / liveTot) * 100) * 10) / 10 : (student.overall_percentage || 0);
+  const effectiveLastUpdated = latestImport?.created_at || student.last_updated || new Date().toISOString();
+
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   res.json({
     student: {
       ...student,
+      overall_percentage: livePct,
+      total_sessions: liveTot > 0 ? liveTot : (student.total_sessions || 0),
+      present_sessions: liveTot > 0 ? livePres : (student.present_sessions || 0),
+      absent_sessions: liveTot > 0 ? liveAbs : (student.absent_sessions || 0),
+      last_updated: effectiveLastUpdated,
       special_class_attendance: specialClassAttendance,
     },
     latestImport: latestImport || null,
@@ -905,6 +927,10 @@ app.get('/api/students/:cu_id/attendance', requireStudentOrAdmin, async (req, re
   const latestImport = await db.get(
     'SELECT id, filename, created_at, status FROM import_jobs ORDER BY created_at DESC LIMIT 1'
   );
+
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
 
   res.json({
     latestFiveDates,

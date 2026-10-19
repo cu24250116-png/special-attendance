@@ -62,9 +62,24 @@ export const StudentAssignments: React.FC<StudentAssignmentsProps> = ({ cuId }) 
     const handleUpdate = () => {
       fetchAssignments();
     };
+    const handleResumeOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        fetchAssignments();
+      }
+    };
+
     window.addEventListener('college_data_updated', handleUpdate);
+    window.addEventListener('visibilitychange', handleResumeOrFocus);
+    window.addEventListener('focus', handleResumeOrFocus);
+    window.addEventListener('online', handleResumeOrFocus);
+    document.addEventListener('resume', handleResumeOrFocus);
+
     return () => {
       window.removeEventListener('college_data_updated', handleUpdate);
+      window.removeEventListener('visibilitychange', handleResumeOrFocus);
+      window.removeEventListener('focus', handleResumeOrFocus);
+      window.removeEventListener('online', handleResumeOrFocus);
+      document.removeEventListener('resume', handleResumeOrFocus);
     };
   }, [cuId]);
 

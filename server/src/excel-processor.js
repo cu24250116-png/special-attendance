@@ -360,7 +360,7 @@ export class ExcelProcessor {
 
     return await db.transaction(async (tx) => {
       // Pre-load existing records into memory maps to avoid 30,000+ round-trip SELECT queries
-      const existingStudentsList = await tx.all('SELECT cu_id, id, password_hash, roll_number, father_name, course, branch, semester, section, email, phone FROM students');
+      const existingStudentsList = await tx.all('SELECT cu_id, password_hash, roll_number, father_name, course, branch, semester, section, email, phone FROM students');
       const existingStudentsMap = new Map();
       for (const s of existingStudentsList) {
         if (s.cu_id) existingStudentsMap.set(String(s.cu_id).toUpperCase().trim(), s);
@@ -831,7 +831,34 @@ export class ExcelProcessor {
         assignmentsUpdated++;
       }
 
-      // 4. Save Import Job Record
+      // 4. Re-synchronize authoritative attendance totals and last_updated for all affected students
+      for (const cuId of affectedCuIds) {
+        const attRows = await tx.all('SELECT total_sessions, present_sessions, absent_sessions FROM attendance_records WHERE cu_id = ?', [cuId]);
+        if (attRows && attRows.length > 0) {
+          let tot = 0;
+          let pres = 0;
+          let abs = 0;
+          for (const r of attRows) {
+            tot += Number(r.total_sessions || 0);
+            pres += Number(r.present_sessions || 0);
+            abs += Number(r.absent_sessions || 0);
+          }
+          const pct = tot > 0 ? Math.round(((pres / tot) * 100) * 10) / 10 : 0;
+          await tx.run(`
+            UPDATE students SET
+              overall_percentage = ?,
+              total_sessions = ?,
+              present_sessions = ?,
+              absent_sessions = ?,
+              last_updated = ?
+            WHERE cu_id = ?
+          `, [pct, tot, pres, abs, now, cuId]);
+        } else {
+          await tx.run('UPDATE students SET last_updated = ? WHERE cu_id = ?', [now, cuId]);
+        }
+      }
+
+      // 5. Save Import Job Record
       const status = errors.length === 0 ? 'success' : (studentsUpdated + attendanceUpdated + assignmentsUpdated > 0 ? 'partial' : 'failed');
       await tx.run(`
         INSERT INTO import_jobs (

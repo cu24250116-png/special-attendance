@@ -189,6 +189,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       ...options,
       headers,
       signal: controller.signal,
+      cache: 'no-store',
     });
     clearTimeout(timeoutId);
 

@@ -148,6 +148,8 @@ export function App() {
     };
     window.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('focus', handleVisibilityChange);
+    window.addEventListener('online', handleVisibilityChange);
+    document.addEventListener('resume', handleVisibilityChange);
 
     // Periodic live sync poll every 15 seconds while active
     const pollInterval = setInterval(() => {
@@ -161,6 +163,8 @@ export function App() {
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       window.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleVisibilityChange);
+      window.removeEventListener('online', handleVisibilityChange);
+      document.removeEventListener('resume', handleVisibilityChange);
       clearInterval(pollInterval);
     };
   }, [studentCuId, adminUser]);

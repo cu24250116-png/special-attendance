@@ -220,6 +220,7 @@ class DatabaseService {
     try { this.sqliteDb.run('ALTER TABLE assignments ADD COLUMN import_job_id TEXT'); } catch(e) {}
     try { this.sqliteDb.run('ALTER TABLE students ADD COLUMN import_job_id TEXT'); } catch(e) {}
     try { this.sqliteDb.run('ALTER TABLE students ADD COLUMN password_changed INTEGER DEFAULT 0'); } catch(e) {}
+    try { this.sqliteDb.run('ALTER TABLE students ADD COLUMN id TEXT'); } catch(e) {}
     try { this.sqliteDb.run("ALTER TABLE users ADD COLUMN department TEXT DEFAULT 'ALL'"); } catch(e) {}
     try { this.sqliteDb.run("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'"); } catch(e) {}
     try { this.sqliteDb.run("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0"); } catch(e) {}
@@ -383,6 +384,7 @@ class DatabaseService {
         "ALTER TABLE assignments ADD COLUMN IF NOT EXISTS import_job_id VARCHAR(64)",
         "ALTER TABLE students ADD COLUMN IF NOT EXISTS import_job_id VARCHAR(64)",
         "ALTER TABLE students ADD COLUMN IF NOT EXISTS password_changed INTEGER DEFAULT 0",
+        "ALTER TABLE students ADD COLUMN IF NOT EXISTS id VARCHAR(64)",
       ];
       for (const sql of migrations) {
         try {

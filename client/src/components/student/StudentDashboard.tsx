@@ -63,13 +63,18 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   useEffect(() => {
     let mounted = true;
-    api.getStudentAttendance(student.cu_id)
-      .then(res => {
-        if (mounted && res.specialClassAttendance) {
-          setSpecialAttendance(res.specialClassAttendance);
-        }
-      })
-      .catch(() => {});
+
+    const fetchFreshData = () => {
+      api.getStudentAttendance(student.cu_id)
+        .then(res => {
+          if (mounted && res.specialClassAttendance) {
+            setSpecialAttendance(res.specialClassAttendance);
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchFreshData();
 
     // Fetch messages for this student's department or all
     api.getStudentMessages(student.cu_id)
@@ -94,11 +99,34 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       }
     };
 
+    // Live update when new Excel is uploaded or attendance is committed by admin
+    const handleLiveCollegeUpdate = () => {
+      if (onRefreshStudent) onRefreshStudent();
+      fetchFreshData();
+    };
+
+    const handleResumeOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        if (onRefreshStudent) onRefreshStudent();
+        fetchFreshData();
+      }
+    };
+
     window.addEventListener('college_admin_message', handleLiveNotice);
+    window.addEventListener('college_data_updated', handleLiveCollegeUpdate);
+    window.addEventListener('visibilitychange', handleResumeOrFocus);
+    window.addEventListener('focus', handleResumeOrFocus);
+    window.addEventListener('online', handleResumeOrFocus);
+    document.addEventListener('resume', handleResumeOrFocus);
 
     return () => {
       mounted = false;
       window.removeEventListener('college_admin_message', handleLiveNotice);
+      window.removeEventListener('college_data_updated', handleLiveCollegeUpdate);
+      window.removeEventListener('visibilitychange', handleResumeOrFocus);
+      window.removeEventListener('focus', handleResumeOrFocus);
+      window.removeEventListener('online', handleResumeOrFocus);
+      document.removeEventListener('resume', handleResumeOrFocus);
     };
   }, [student.cu_id, student.branch, student.course, student.last_updated, lastSyncNotice]);
 

@@ -47,8 +47,13 @@ cd ../..
 echo Copying newly built APK to apk folder and downloads...
 if not exist apk mkdir apk
 if not exist server\public\downloads mkdir server\public\downloads
-copy /y "client\android\app\build\outputs\apk\debug\app-debug.apk" "apk\SpecialAttendance.apk"
-copy /y "client\android\app\build\outputs\apk\debug\app-debug.apk" "server\public\downloads\SpecialAttendance.apk"
+if exist "client\android\app\build\outputs\apk\release\app-release.apk" (
+    copy /y "client\android\app\build\outputs\apk\release\app-release.apk" "apk\SpecialAttendance.apk"
+    copy /y "client\android\app\build\outputs\apk\release\app-release.apk" "server\public\downloads\SpecialAttendance.apk"
+) else (
+    copy /y "client\android\app\build\outputs\apk\debug\app-debug.apk" "apk\SpecialAttendance.apk"
+    copy /y "client\android\app\build\outputs\apk\debug\app-debug.apk" "server\public\downloads\SpecialAttendance.apk"
+)
 
 echo ====================================================
 echo SUCCESS! Fresh APK with latest dataset is ready!
