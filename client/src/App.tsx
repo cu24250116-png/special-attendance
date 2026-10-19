@@ -58,7 +58,15 @@ export function App() {
     if (!id) return;
     try {
       const res = await api.getStudentProfile(id);
-      setStudentData(res.student);
+      if (res && res.student) {
+        const importTime = res.latestImport?.created_at;
+        const studentTime = res.student.last_updated;
+        const newest = (importTime && (!studentTime || new Date(importTime) > new Date(studentTime))) ? importTime : studentTime;
+        setStudentData({
+          ...res.student,
+          last_updated: newest || studentTime,
+        });
+      }
     } catch (err) {
       console.error('Failed to fetch student profile:', err);
     }

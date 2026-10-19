@@ -41,11 +41,21 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [specialAttendance, setSpecialAttendance] = useState<SpecialClassAttendance | null>(
     student.special_class_attendance || null
   );
+  const [displayLastUpdated, setDisplayLastUpdated] = useState<string>(
+    student.last_updated || ''
+  );
+  const [latestFileName, setLatestFileName] = useState<string>('');
 
-  // Synchronize specialAttendance whenever student prop updates from SSE or parent re-fetch
+  // Synchronize specialAttendance and displayLastUpdated whenever student prop updates
   useEffect(() => {
     if (student.special_class_attendance) {
       setSpecialAttendance(student.special_class_attendance);
+    }
+    if (student.last_updated) {
+      setDisplayLastUpdated(prev => {
+        if (!prev) return student.last_updated;
+        return new Date(student.last_updated) > new Date(prev) ? student.last_updated : prev;
+      });
     }
   }, [student.special_class_attendance, student.last_updated]);
 
@@ -64,14 +74,33 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   useEffect(() => {
     let mounted = true;
 
-    const fetchFreshData = () => {
-      api.getStudentAttendance(student.cu_id)
-        .then(res => {
-          if (mounted && res.specialClassAttendance) {
-            setSpecialAttendance(res.specialClassAttendance);
-          }
-        })
-        .catch(() => {});
+    const fetchFreshData = async () => {
+      try {
+        const [attRes, profRes] = await Promise.all([
+          api.getStudentAttendance(student.cu_id).catch(() => null),
+          api.getStudentProfile(student.cu_id).catch(() => null),
+        ]);
+        if (!mounted) return;
+        if (attRes?.specialClassAttendance) {
+          setSpecialAttendance(attRes.specialClassAttendance);
+        }
+        const candidates = [
+          attRes?.lastUpdated,
+          attRes?.latestImport?.created_at,
+          profRes?.student?.last_updated,
+          profRes?.latestImport?.created_at,
+          student.last_updated,
+        ].filter(Boolean) as string[];
+
+        if (candidates.length > 0) {
+          candidates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+          setDisplayLastUpdated(candidates[0]);
+        }
+        const filename = attRes?.latestImport?.filename || profRes?.latestImport?.filename;
+        if (filename) {
+          setLatestFileName(filename);
+        }
+      } catch (e) {}
     };
 
     fetchFreshData();
@@ -151,9 +180,28 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       if (onRefreshStudent) {
         await onRefreshStudent();
       }
-      const res = await api.getStudentAttendance(student.cu_id);
-      if (res.specialClassAttendance) {
-        setSpecialAttendance(res.specialClassAttendance);
+      const [attRes, profRes] = await Promise.all([
+        api.getStudentAttendance(student.cu_id).catch(() => null),
+        api.getStudentProfile(student.cu_id).catch(() => null),
+      ]);
+      if (attRes?.specialClassAttendance) {
+        setSpecialAttendance(attRes.specialClassAttendance);
+      }
+      const candidates = [
+        attRes?.lastUpdated,
+        attRes?.latestImport?.created_at,
+        profRes?.student?.last_updated,
+        profRes?.latestImport?.created_at,
+        student.last_updated,
+      ].filter(Boolean) as string[];
+
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+        setDisplayLastUpdated(candidates[0]);
+      }
+      const filename = attRes?.latestImport?.filename || profRes?.latestImport?.filename;
+      if (filename) {
+        setLatestFileName(filename);
       }
     } catch (e) {
       console.error('Refresh error:', e);
@@ -193,8 +241,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
     return 'text-rose-400 stroke-rose-500';
   };
 
-  const formattedDate = student.last_updated
-    ? new Date(student.last_updated).toLocaleString('en-IN', {
+  const effectiveDate = displayLastUpdated || student.last_updated;
+  const formattedDate = effectiveDate
+    ? new Date(effectiveDate).toLocaleString('en-IN', {
         timeZone: 'Asia/Kolkata',
         month: 'short',
         day: 'numeric',
@@ -202,7 +251,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         hour: 'numeric',
         minute: 'numeric',
         hour12: true,
-      }) + ' IST'
+      })
     : 'Just now';
 
   return (
@@ -277,7 +326,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               onClick={handleRefresh}
               disabled={isRefreshing}
               className="flex items-center space-x-1.5 text-[11px] text-slate-300 hover:text-white bg-slate-900/90 hover:bg-slate-800 px-3 py-2 rounded-xl border border-slate-700/70 shadow-sm transition active:scale-95 cursor-pointer disabled:opacity-75"
-              title="Click to check for latest attendance updates from college"
+              title={effectiveDate ? `Latest college attendance update: ${new Date(effectiveDate).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST${latestFileName ? ` (${latestFileName})` : ''}` : 'Click to check for latest attendance updates from college'}
             >
               <RefreshCw className={`w-3.5 h-3.5 text-sky-400 ${isRefreshing ? 'animate-spin' : ''}`} />
               <span>{isRefreshing ? 'Syncing...' : `Updated: ${formattedDate}`}</span>

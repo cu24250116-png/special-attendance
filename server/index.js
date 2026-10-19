@@ -612,6 +612,16 @@ app.post('/api/auth/student/login', rateLimitMiddleware(30, 60000), async (req, 
   const studentAssignments = await db.all('SELECT * FROM assignments WHERE cu_id = ?', [student.cu_id]);
   const specialClassAttendance = computeSpecialClassAttendance(student.cu_id, studentRecords, studentAssignments);
 
+  const latestImport = await db.get(
+    'SELECT id, filename, uploaded_by, created_at, status FROM import_jobs ORDER BY created_at DESC LIMIT 1'
+  );
+  let effectiveLastUpdated = student.last_updated;
+  if (latestImport?.created_at) {
+    if (!effectiveLastUpdated || new Date(latestImport.created_at) > new Date(effectiveLastUpdated)) {
+      effectiveLastUpdated = latestImport.created_at;
+    }
+  }
+
   res.json({
     success: true,
     message: 'Login successful',
@@ -629,9 +639,10 @@ app.post('/api/auth/student/login', rateLimitMiddleware(30, 60000), async (req, 
       total_sessions: student.total_sessions,
       present_sessions: student.present_sessions,
       absent_sessions: student.absent_sessions,
-      last_updated: student.last_updated,
+      last_updated: effectiveLastUpdated,
       special_class_attendance: specialClassAttendance,
     },
+    latestImport: latestImport || null,
   });
 });
 
@@ -806,7 +817,7 @@ app.get('/api/students/:cu_id', requireStudentOrAdmin, async (req, res) => {
   const specialClassAttendance = computeSpecialClassAttendance(cuId, allRecords, assignments);
 
   const latestImport = await db.get(
-    'SELECT id, filename, created_at, status FROM import_jobs ORDER BY created_at DESC LIMIT 1'
+    'SELECT id, filename, uploaded_by, created_at, status FROM import_jobs ORDER BY created_at DESC LIMIT 1'
   );
 
   let liveTot = 0;
@@ -818,7 +829,13 @@ app.get('/api/students/:cu_id', requireStudentOrAdmin, async (req, res) => {
     liveAbs += Number(r.absent_sessions || 0);
   }
   const livePct = liveTot > 0 ? Math.round(((livePres / liveTot) * 100) * 10) / 10 : (student.overall_percentage || 0);
-  const effectiveLastUpdated = latestImport?.created_at || student.last_updated || new Date().toISOString();
+
+  let effectiveLastUpdated = student.last_updated;
+  if (latestImport?.created_at) {
+    if (!effectiveLastUpdated || new Date(latestImport.created_at) > new Date(effectiveLastUpdated)) {
+      effectiveLastUpdated = latestImport.created_at;
+    }
+  }
 
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
   res.setHeader('Pragma', 'no-cache');
@@ -925,8 +942,15 @@ app.get('/api/students/:cu_id/attendance', requireStudentOrAdmin, async (req, re
   const lastFiveDaysRecords = allRecords.filter(r => latestFiveDates.includes(r.attendance_date));
 
   const latestImport = await db.get(
-    'SELECT id, filename, created_at, status FROM import_jobs ORDER BY created_at DESC LIMIT 1'
+    'SELECT id, filename, uploaded_by, created_at, status FROM import_jobs ORDER BY created_at DESC LIMIT 1'
   );
+
+  let effectiveLastUpdated = student.last_updated;
+  if (latestImport?.created_at) {
+    if (!effectiveLastUpdated || new Date(latestImport.created_at) > new Date(effectiveLastUpdated)) {
+      effectiveLastUpdated = latestImport.created_at;
+    }
+  }
 
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
   res.setHeader('Pragma', 'no-cache');
@@ -940,7 +964,7 @@ app.get('/api/students/:cu_id/attendance', requireStudentOrAdmin, async (req, re
     hasRecords: allRecords.length > 0 || specialClassAttendance.totalSpecialDates > 0,
     specialClassAttendance,
     latestImport: latestImport || null,
-    lastUpdated: latestImport?.created_at || student.last_updated || new Date().toISOString(),
+    lastUpdated: effectiveLastUpdated,
     serverTime: new Date().toISOString(),
   });
 });
@@ -1538,6 +1562,27 @@ app.get('/api/students/:cu_id/messages', requireStudentOrAdmin, async (req, res)
     res.json({ messages });
   } catch (err) {
     res.status(500).json({ error: `Failed to fetch student messages: ${err.message}` });
+  }
+});
+
+// System Synchronized Status for Health & Live Monitors
+app.get('/api/system/sync-status', async (req, res) => {
+  try {
+    const latestImport = await db.get(
+      'SELECT id, filename, uploaded_by, status, created_at, students_updated, attendance_updated, assignments_updated FROM import_jobs ORDER BY created_at DESC LIMIT 1'
+    );
+    const totalStudentsRow = await db.get('SELECT COUNT(*) as count FROM students');
+    const totalAttendanceRow = await db.get('SELECT COUNT(*) as count FROM attendance_records');
+    res.json({
+      online: true,
+      serverTime: new Date().toISOString(),
+      latestImport: latestImport || null,
+      lastUpdated: latestImport?.created_at || null,
+      totalStudents: totalStudentsRow ? Number(totalStudentsRow.count) : 0,
+      totalAttendanceRecords: totalAttendanceRow ? Number(totalAttendanceRow.count) : 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

@@ -420,7 +420,7 @@ export const api = {
 
   // Student Endpoints
   getStudentProfile: (cu_id: string) =>
-    request<{ student: Student }>(`/students/${encodeURIComponent(cu_id)}`),
+    request<{ student: Student; latestImport?: ImportJob | null; serverTime?: string }>(`/students/${encodeURIComponent(cu_id)}`),
 
   getStudentAttendance: (cu_id: string) =>
     request<{
@@ -430,6 +430,9 @@ export const api = {
       totalRecords: number;
       hasRecords: boolean;
       specialClassAttendance?: SpecialClassAttendance;
+      latestImport?: ImportJob | null;
+      lastUpdated?: string;
+      serverTime?: string;
     }>(`/students/${encodeURIComponent(cu_id)}/attendance`),
 
   getStudentAssignments: (cu_id: string) =>

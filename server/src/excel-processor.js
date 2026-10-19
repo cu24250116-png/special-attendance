@@ -1,8 +1,13 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import db from './database.js';
 import { hashPassword } from './auth.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Flexible column name normalizer
 function normalizeKey(str) {

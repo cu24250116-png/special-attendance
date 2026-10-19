@@ -107,8 +107,14 @@ async function exportBundledData() {
     adminMessages = await db.all('SELECT * FROM admin_messages ORDER BY created_at DESC LIMIT 50');
   } catch (e) {}
 
+  let latestImport = null;
+  try {
+    latestImport = await db.get('SELECT * FROM import_jobs ORDER BY created_at DESC LIMIT 1');
+  } catch (e) {}
+
   const bundle = {
     exportedAt: new Date().toISOString(),
+    latestImport,
     totalStudents: students.length,
     adminMessages,
     students: {}
@@ -118,6 +124,10 @@ async function exportBundledData() {
     const studentRecords = (attendanceByStudent[s.cu_id] || []).sort((a, b) => b.attendance_date.localeCompare(a.attendance_date));
     const studentAssignments = (assignmentsByStudent[s.cu_id] || []).sort((a, b) => (a.submission_deadline || '').localeCompare(b.submission_deadline || ''));
     const specialClassAttendance = computeSpecialClassAttendance(s.cu_id, studentRecords, studentAssignments);
+
+    const effectiveLastUpdated = latestImport?.created_at && (!s.last_updated || new Date(latestImport.created_at) > new Date(s.last_updated))
+      ? latestImport.created_at
+      : s.last_updated;
 
     // Compute dailySummaries
     const trackerDates = specialClassAttendance.specialDates.map(st => st.date);
@@ -185,6 +195,7 @@ async function exportBundledData() {
     bundle.students[s.cu_id.toUpperCase()] = {
       profile: {
         ...s,
+        last_updated: effectiveLastUpdated,
         special_class_attendance: specialClassAttendance,
       },
       attendance: {
